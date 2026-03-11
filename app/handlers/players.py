@@ -28,6 +28,20 @@ from app.repositories.users import UsersRepository
 logger = logging.getLogger(__name__)
 router = Router()
 
+MENU_BUTTON_TEXTS = {
+    MAIN_MENU_ADD_PLAYER,
+    MAIN_MENU_PLAYERS,
+    MAIN_MENU_LAST_MATCH,
+    MAIN_MENU_PROFILE,
+    MAIN_MENU_ANALYTICS,
+    MAIN_MENU_DASHBOARD,
+    MAIN_MENU_PATCHNOTES,
+    MAIN_MENU_SETTINGS,
+    MAIN_MENU_HELP,
+    SETTINGS_ENABLE_AUTO,
+    SETTINGS_DISABLE_AUTO,
+}
+
 
 def _profile_link(account_id: str, personaname: str, profile_url: str | None, api: DeadlockApiClient) -> str:
     url = profile_url or f"https://steamcommunity.com/profiles/{api.account_id_to_steam64(account_id)}"
@@ -111,7 +125,7 @@ async def cmd_addplayer(message: Message) -> None:
     await _resolve_and_save_player(message, args[1].strip())
 
 
-@router.message(F.text & ~F.text.startswith("/"))
+@router.message(F.text & ~F.text.startswith("/") & ~F.text.in_(MENU_BUTTON_TEXTS))
 async def handle_pending_add_player(message: Message) -> None:
     awaiting_add: set[int] = router.awaiting_add_input  # type: ignore[attr-defined]
     if message.from_user.id not in awaiting_add:
