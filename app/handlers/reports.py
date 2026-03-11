@@ -3,6 +3,7 @@ from datetime import datetime
 from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, FSInputFile, Message
+from httpx import HTTPStatusError
 
 from app.clients.deadlock_api import DeadlockApiClient
 from app.keyboards.inline import report_actions_keyboard
@@ -33,7 +34,15 @@ def setup_reports_dependencies(
 
 async def _send_profile(message: Message, player_id: str) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
-    profile = await api.get_player_profile(player_id)
+    try:
+        profile = await api.get_player_profile(player_id)
+    except HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            await message.answer(
+                "Игрок не найден в API. Проверьте ID (возможна путаница между SteamID64 и account_id)."
+            )
+            return
+        raise
     await message.answer(
         f"<b>Профиль игрока</b>\n"
         f"ID: <code>{profile.get('player_id', player_id)}</code>\n"
@@ -49,7 +58,15 @@ async def _send_last_match(message: Message, player_id: str) -> None:
     analytics: AnalyticsService = router.analytics  # type: ignore[attr-defined]
     cards: CardRenderer = router.cards  # type: ignore[attr-defined]
 
-    matches = await api.get_player_recent_matches(player_id)
+    try:
+        matches = await api.get_player_recent_matches(player_id)
+    except HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            await message.answer(
+                "Не удалось найти игрока/матчи в API. Проверьте ID (SteamID64/account_id)."
+            )
+            return
+        raise
     if not matches:
         await message.answer("Не удалось получить матчи игрока.")
         return
@@ -130,7 +147,14 @@ async def cb_autoff(callback: CallbackQuery) -> None:
 async def cb_profile(callback: CallbackQuery) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
     player_id = callback.data.split(":")[1]
-    profile = await api.get_player_profile(player_id)
+    try:
+        profile = await api.get_player_profile(player_id)
+    except HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            await callback.message.answer("Профиль не найден. Проверьте ID игрока.")
+            await callback.answer()
+            return
+        raise
     await callback.message.answer(
         f"Профиль: <b>{profile.get('display_name', player_id)}</b>\n"
         f"MMR: <b>{profile.get('mmr', '—')}</b>",
