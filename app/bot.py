@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from app.clients.assets import AssetsClient
@@ -41,7 +42,7 @@ async def main() -> None:
     analytics_service = AnalyticsService()
     card_renderer = CardRenderer(assets, settings.card_output_dir)
 
-    bot = Bot(token=settings.bot_token, parse_mode=ParseMode.HTML)
+    bot = Bot(token=settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
     setup_players_dependencies(users_repo, players_repo, api)
