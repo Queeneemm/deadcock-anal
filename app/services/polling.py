@@ -107,8 +107,9 @@ class PollingService:
             analytics = self.analytics.analyze(summary, recent_matches, hero_history, week_matches)
             card_path = await self.cards.render(tracked.display_name, summary, analytics)
 
+            title = (f'<a href="{tracked.steam_profile_url}">{tracked.display_name}</a>' if tracked.steam_profile_url else f"<b>{tracked.display_name}</b>")
             caption = (
-                f"<b>{tracked.display_name}</b> • <b>{summary.hero_name}</b>\n"
+                f"{title} • <b>{summary.hero_name}</b>\n"
                 f"Результат: <b>{'Победа' if summary.is_win else 'Поражение'}</b>\n"
                 f"K/D/A: <code>{summary.kills}/{summary.deaths}/{summary.assists}</code> | "
                 f"Souls: <code>{summary.souls}</code> | Damage: <code>{summary.damage}</code>"
