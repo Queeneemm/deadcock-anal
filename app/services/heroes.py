@@ -33,7 +33,7 @@ HERO_NAME_MAP: dict[int, str] = {
     66: "Victor",
     67: "Paige",
     69: "The Doorman",
-    70: "Rem",
+    79: "Rem",
     72: "Billy",
     76: "Graves",
     77: "Apollo",
@@ -46,7 +46,7 @@ def hero_name_by_id(hero_id: int | str | None) -> str:
     if hero_id is None:
         return "Неизвестный герой"
     try:
-        value = int(hero_id)
+        value = int(float(hero_id))
     except (TypeError, ValueError):
         return f"Hero #{hero_id}"
     return HERO_NAME_MAP.get(value, f"Hero #{value}")
