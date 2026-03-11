@@ -64,7 +64,7 @@ class PollingService:
             self._warn_once(f"notfound:{tracked.player_id}", "Игрок %s не найден в Deadlock API", tracked.player_id)
             return
         except DeadlockApiTemporaryError:
-            logger.warning("Временная ошибка API (возможно rate limit) для игрока %s, пропускаем тик", tracked.player_id)
+            logger.warning("Временная ошибка API и нет кэша match-history для игрока %s, пропускаем тик", tracked.player_id)
             return
         except DeadlockApiError:
             logger.exception("Ошибка API для игрока %s", tracked.player_id)

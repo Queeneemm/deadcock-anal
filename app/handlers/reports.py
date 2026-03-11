@@ -17,6 +17,7 @@ router = Router()
 
 RATE_LIMIT_MESSAGE = "Слишком много запросов к API Deadlock. Подожди несколько секунд и попробуй снова."
 TEMPORARY_API_MESSAGE = "API Deadlock сейчас временно перегружено. Попробуй ещё раз через несколько секунд."
+MATCH_HISTORY_TEMPORARY_MESSAGE = "История матчей временно недоступна. Попробуй позже."
 
 
 async def _notify_temporary_api_issue(message: Message, callback: CallbackQuery | None = None) -> None:
@@ -296,7 +297,7 @@ async def cmd_lastmatch(message: Message) -> None:
     try:
         await _send_last_match(message, player_id)
     except DeadlockApiTemporaryError:
-        await message.answer(RATE_LIMIT_MESSAGE)
+        await message.answer(MATCH_HISTORY_TEMPORARY_MESSAGE)
     except (DeadlockApiNotFoundError, DeadlockApiError):
         await message.answer("Не удалось получить матч. Проверьте account_id и API.")
 
@@ -510,7 +511,12 @@ async def cb_select_player_for_action(callback: CallbackQuery) -> None:
         if action == "profile":
             await _send_profile(callback.message, account_id)
         elif action == "lastmatch":
-            await _send_last_match(callback.message, account_id)
+            try:
+                await _send_last_match(callback.message, account_id)
+            except DeadlockApiTemporaryError:
+                await callback.message.answer(MATCH_HISTORY_TEMPORARY_MESSAGE)
+                await callback.answer()
+                return
         elif action == "heroes":
             stats = await api.get_player_hero_stats([account_id])
             if not stats:
@@ -572,7 +578,7 @@ async def cb_lastmatch(callback: CallbackQuery) -> None:
         await callback.answer()
     except DeadlockApiTemporaryError:
         await callback.answer("API перегружено, попробуйте позже.", show_alert=False)
-        await callback.message.answer(TEMPORARY_API_MESSAGE)
+        await callback.message.answer(MATCH_HISTORY_TEMPORARY_MESSAGE)
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("rp:"))

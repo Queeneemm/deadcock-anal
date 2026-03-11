@@ -38,7 +38,7 @@ async def main() -> None:
         rate_limiter,
         max_retries=settings.deadlock_api_max_retries,
         retry_base_delay=settings.deadlock_api_retry_base_delay,
-        match_history_ttl_seconds=settings.deadlock_api_match_history_ttl,
+        match_history_ttl_seconds=settings.deadlock_match_history_ttl_seconds,
         enable_cache=settings.deadlock_api_enable_cache,
     )
     assets = AssetsClient(settings.deadlock_assets_base_url, settings.asset_cache_dir, settings.request_timeout_seconds)
