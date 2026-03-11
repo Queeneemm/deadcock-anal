@@ -203,19 +203,18 @@ async def _send_profile(message: Message, player_id: str) -> None:
     )
 
 
-async def _send_last_match(message: Message, player_id: str, matches: list[dict] | None = None) -> None:
+async def _send_last_match(message: Message, player_id: str) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
     matches_repo: MatchesRepository = router.matches_repo  # type: ignore[attr-defined]
     analytics: AnalyticsService = router.analytics  # type: ignore[attr-defined]
     cards: CardRenderer = router.cards  # type: ignore[attr-defined]
 
     account_id = api.normalize_account_id(player_id)
-    matches = matches if matches is not None else await api.get_player_recent_matches(account_id, limit=20)
-    if not matches:
-        await message.answer("Не удалось получить матчи игрока.")
+    latest = await api.get_last_match(account_id)
+    if latest is None:
+        await message.answer("История матчей пуста.")
         return
 
-    latest = matches[0]
     parsed = api.parse_match_for_player(latest, account_id)
     match_id = str(parsed["match_id"] or latest.get("match_id") or latest.get("id") or "unknown")
 
