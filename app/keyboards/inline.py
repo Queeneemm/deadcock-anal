@@ -4,21 +4,15 @@ MAIN_MENU_ADD_PLAYER = "➕ Добавить игрока"
 MAIN_MENU_PLAYERS = "👥 Мои игроки"
 MAIN_MENU_LAST_MATCH = "📄 Последний матч"
 MAIN_MENU_PROFILE = "🧾 Профиль"
+MAIN_MENU_ANALYTICS = "📊 Аналитика"
+MAIN_MENU_SETTINGS = "⚙️ Настройки"
 MAIN_MENU_HELP = "❓ Помощь"
+SETTINGS_ENABLE_AUTO = "🔔 Включить автоотчёты всем"
+SETTINGS_DISABLE_AUTO = "🔕 Выключить автоотчёты всем"
 
 
 def commands_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="/players"), KeyboardButton(text="/addplayer")],
-            [KeyboardButton(text="/lastmatch"), KeyboardButton(text="/profile")],
-            [KeyboardButton(text="/heroes"), KeyboardButton(text="/besthero")],
-            [KeyboardButton(text="/teammates"), KeyboardButton(text="/enemies")],
-            [KeyboardButton(text="/party"), KeyboardButton(text="/meta")],
-            [KeyboardButton(text="/leaderboard"), KeyboardButton(text="/patches")],
-        ],
-        resize_keyboard=True,
-    )
+    return main_menu_keyboard()
 
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
@@ -26,12 +20,23 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=MAIN_MENU_ADD_PLAYER), KeyboardButton(text=MAIN_MENU_PLAYERS)],
             [KeyboardButton(text=MAIN_MENU_LAST_MATCH), KeyboardButton(text=MAIN_MENU_PROFILE)],
+            [KeyboardButton(text=MAIN_MENU_ANALYTICS), KeyboardButton(text=MAIN_MENU_SETTINGS)],
             [KeyboardButton(text=MAIN_MENU_HELP)],
         ],
         resize_keyboard=True,
     )
 
 
+
+
+def settings_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=SETTINGS_ENABLE_AUTO), KeyboardButton(text=SETTINGS_DISABLE_AUTO)],
+            [KeyboardButton(text=MAIN_MENU_HELP)],
+        ],
+        resize_keyboard=True,
+    )
 def report_actions_keyboard(player_id: str, match_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -39,6 +44,16 @@ def report_actions_keyboard(player_id: str, match_id: str) -> InlineKeyboardMark
             [InlineKeyboardButton(text="Прошлый матч", callback_data=f"prev:{player_id}:{match_id}")],
             [InlineKeyboardButton(text="Профиль", callback_data=f"profile:{player_id}")],
             [InlineKeyboardButton(text="Отключить автоотслеживание", callback_data=f"autoff:{player_id}")],
+        ]
+    )
+
+
+def analytics_actions_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🦸 Герои", callback_data="menu:heroes"), InlineKeyboardButton(text="🏆 Лучший герой", callback_data="menu:besthero")],
+            [InlineKeyboardButton(text="🤝 Тиммейты", callback_data="menu:teammates"), InlineKeyboardButton(text="⚔️ Соперники", callback_data="menu:enemies")],
+            [InlineKeyboardButton(text="🎉 Пати", callback_data="menu:party"), InlineKeyboardButton(text="🌍 Мета", callback_data="menu:meta")],
         ]
     )
 

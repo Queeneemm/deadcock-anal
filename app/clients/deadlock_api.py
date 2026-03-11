@@ -425,16 +425,16 @@ class DeadlockApiClient:
         raw_hero_id = match_payload.get("hero_id")
         hero_id = int(raw_hero_id) if isinstance(raw_hero_id, (int, float, str)) and str(raw_hero_id).isdigit() else 0
         hero_name = f"Hero #{hero_id}" if hero_id > 0 else "Неизвестный герой"
-        match_result = str(match_payload.get("match_result") or "").lower()
-        player_team = str(match_payload.get("player_team") or "").lower()
+        match_result = str(match_payload.get("match_result") or "").strip().lower()
+        player_team = str(match_payload.get("player_team") or "").strip().lower()
 
         is_win = False
         if match_result in {"win", "won", "victory", "true", "1"}:
             is_win = True
         elif match_result in {"loss", "lose", "lost", "defeat", "false", "0"}:
             is_win = False
-        elif match_result and player_team and match_result == player_team:
-            is_win = True
+        elif match_result and player_team:
+            is_win = match_result == player_team
 
         return {
             "match_id": str(match_payload.get("match_id") or match_payload.get("id") or ""),

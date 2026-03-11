@@ -500,6 +500,88 @@ async def cmd_patches(message: Message) -> None:
 
 
 
+@router.callback_query(lambda c: c.data and c.data.startswith("menu:"))
+async def cb_menu_actions(callback: CallbackQuery) -> None:
+    action = callback.data.split(":", maxsplit=1)[1]
+    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
+    tracked = players_repo.list_players(callback.from_user.id)
+    if not tracked:
+        await callback.answer("Сначала добавьте игрока", show_alert=False)
+        await callback.message.answer("У вас нет сохранённых игроков. Добавьте через /addplayer.")
+        return
+    if action == "meta":
+        await cmd_meta(callback.message)
+        await callback.answer()
+        return
+    if len(tracked) == 1:
+        account_id = tracked[0].player_id
+        api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
+        try:
+            normalized = api.normalize_account_id(account_id)
+            if action == "profile":
+                await _send_profile(callback.message, normalized)
+            elif action == "lastmatch":
+                await _send_last_match(callback.message, normalized)
+            elif action == "heroes":
+                stats = await api.get_player_hero_stats([normalized])
+                if not stats:
+                    await callback.message.answer("Нет hero-stats для этого игрока.")
+                else:
+                    lines = [f"<b>Герои игрока</b> <code>{normalized}</code>"]
+                    for item in stats[:12]:
+                        lines.append(
+                            f"• <b>{hero_name_by_id(item.get('hero_id'))}</b>: матчей {item.get('matches_played') or item.get('matches') or 0}, "
+                            f"wins {item.get('wins') or 0}, K/D/A {item.get('kills') or 0}/{item.get('deaths') or 0}/{item.get('assists') or 0}, "
+                            f"NPM {item.get('networth_per_min') or '—'}"
+                        )
+                    await callback.message.answer("\n".join(lines), parse_mode="HTML")
+            elif action == "besthero":
+                stats = await api.get_player_hero_stats([normalized])
+                best = max(stats, key=lambda x: (_extract_winrate(x), int(x.get("matches_played") or x.get("matches") or 0)), default=None)
+                if not best:
+                    await callback.message.answer("Недостаточно данных по героям.")
+                else:
+                    await callback.message.answer(
+                        f"Лучший герой: <b>{hero_name_by_id(best.get('hero_id'))}</b>\n"
+                        f"Матчей: <b>{best.get('matches_played') or best.get('matches') or 0}</b>\n"
+                        f"Winrate: <b>{_format_winrate(best)}</b>",
+                        parse_mode="HTML",
+                    )
+            elif action == "teammates":
+                await _send_relation_stats(callback.message, normalized, mode="mates")
+            elif action == "enemies":
+                await _send_relation_stats(callback.message, normalized, mode="enemies")
+            elif action == "party":
+                stats = await api.get_player_party_stats(normalized)
+                if not stats:
+                    await callback.message.answer("Нет данных party-stats.")
+                else:
+                    total = sum(int(x.get("matches") or x.get("games") or 0) for x in stats)
+                    best = max(stats, key=lambda x: _extract_winrate(x), default={})
+                    await callback.message.answer(
+                        f"<b>Пати-статистика</b> <code>{normalized}</code>\n"
+                        f"Всего пати-игр: <b>{total}</b>\n"
+                        f"Лучшая пати-связка (по WR): <b>{best.get('party_size') or best.get('size') or '—'}</b>\n"
+                        f"Winrate: <b>{_format_winrate(best)}</b>",
+                        parse_mode="HTML",
+                    )
+            else:
+                await callback.answer("Неизвестный раздел.")
+                return
+            await callback.answer()
+        except DeadlockApiTemporaryError:
+            await callback.answer("API перегружено, попробуйте позже.", show_alert=False)
+            await callback.message.answer(TEMPORARY_API_MESSAGE)
+        return
+
+    players = [(p.player_id, p.display_name) for p in tracked]
+    await callback.message.answer(
+        "У вас несколько игроков. Выберите профиль:",
+        reply_markup=player_select_keyboard(action, players),
+    )
+    await callback.answer()
+
+
 @router.callback_query(lambda c: c.data and c.data.startswith("sel:"))
 async def cb_select_player_for_action(callback: CallbackQuery) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
