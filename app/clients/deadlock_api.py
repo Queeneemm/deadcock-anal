@@ -80,7 +80,10 @@ class DeadlockApiClient:
                 if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
                     retriable = True
                 if not retriable or attempt == retries - 1:
-                    logger.exception("Ошибка запроса Deadlock API: %s %s", method, path)
+                    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404:
+                        logger.info("Deadlock API вернул 404: %s %s", method, path)
+                    else:
+                        logger.exception("Ошибка запроса Deadlock API: %s %s", method, path)
                     raise
                 backoff = 2**attempt
                 logger.warning("Временная ошибка Deadlock API, повтор через %s сек", backoff)
