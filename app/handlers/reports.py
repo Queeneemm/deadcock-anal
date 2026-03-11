@@ -4,13 +4,7 @@ from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
-from app.clients.deadlock_api import (
-    DeadlockApiClient,
-    DeadlockApiError,
-    DeadlockApiNotFoundError,
-    DeadlockApiTemporaryError,
-    DeadlockApiUnsupportedRouteError,
-)
+from app.clients.deadlock_api import DeadlockApiClient, DeadlockApiError, DeadlockApiNotFoundError, DeadlockApiTemporaryError
 from app.keyboards.inline import report_actions_keyboard
 from app.models import MatchSummary
 from app.repositories.matches import MatchesRepository
@@ -39,23 +33,71 @@ def setup_reports_dependencies(
 
 async def _send_profile(message: Message, player_id: str) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
-    try:
-        profile = await api.get_player_profile(player_id)
-    except DeadlockApiNotFoundError:
-        await message.answer("Профиль не найден. Проверьте account_id или SteamID64.")
-        return
-    except DeadlockApiTemporaryError:
-        await message.answer("API временно недоступен. Попробуйте позже.")
-        return
-    except DeadlockApiError:
-        await message.answer("Не удалось получить профиль из API.")
+    matches_repo: MatchesRepository = router.matches_repo  # type: ignore[attr-defined]
+
+    local_recent = matches_repo.get_recent_player_matches(player_id, 20)
+    if local_recent:
+        summaries = local_recent
+    else:
+        try:
+            history = await api.get_player_recent_matches(player_id)
+        except DeadlockApiNotFoundError:
+            await message.answer("Профиль не найден. Проверьте account_id или SteamID64.")
+            return
+        except DeadlockApiTemporaryError:
+            await message.answer("API временно недоступен. Попробуйте позже.")
+            return
+        except DeadlockApiError:
+            await message.answer("Не удалось получить профиль из API.")
+            return
+
+        summaries = []
+        for item in history[:20]:
+            parsed = api.parse_match_for_player(item, player_id)
+            summary = MatchSummary(
+                match_id=parsed["match_id"] or "unknown",
+                match_datetime=datetime.fromisoformat(parsed["match_datetime"].replace("Z", "+00:00")),
+                hero_name=parsed["hero_name"],
+                is_win=parsed["is_win"],
+                kills=parsed["kills"],
+                deaths=parsed["deaths"],
+                assists=parsed["assists"],
+                souls=parsed["souls"],
+                damage=parsed["damage"],
+                duration_seconds=parsed["duration_seconds"],
+                items=parsed["items"],
+                team_damage_rank=parsed.get("team_damage_rank"),
+                team_souls_rank=parsed.get("team_souls_rank"),
+                raw_payload=parsed.get("raw_payload"),
+            )
+            matches_repo.store_player_match_history(player_id, summary)
+            summaries.append(summary)
+
+    if not summaries:
+        await message.answer("Нет данных для построения профиля по истории матчей.")
         return
 
+    matches_count = len(summaries)
+    avg_kda = sum((m.kills + m.assists) / max(m.deaths, 1) for m in summaries) / matches_count
+    avg_souls = sum(m.souls for m in summaries) / matches_count
+    avg_last_hits = sum(int((m.raw_payload or {}).get("last_hits") or 0) for m in summaries) / matches_count
+    wins = sum(1 for m in summaries if m.is_win)
+
+    hero_freq: dict[str, int] = {}
+    for m in summaries:
+        hero_freq[m.hero_name] = hero_freq.get(m.hero_name, 0) + 1
+    top_heroes = sorted(hero_freq.items(), key=lambda x: x[1], reverse=True)[:3]
+    top_heroes_text = ", ".join(f"{hero} ({count})" for hero, count in top_heroes) if top_heroes else "—"
+
     await message.answer(
-        f"<b>Профиль игрока</b>\n"
-        f"ID: <code>{profile.get('account_id', profile.get('player_id', player_id))}</code>\n"
-        f"Ник: <b>{profile.get('display_name', profile.get('personaname', '—'))}</b>\n"
-        f"MMR: <b>{profile.get('mmr', '—')}</b>",
+        f"<b>Профиль игрока (по match-history)</b>\n"
+        f"ID: <code>{player_id}</code>\n"
+        f"Последних матчей: <b>{matches_count}</b>\n"
+        f"Winrate: <b>{(wins / matches_count) * 100:.1f}%</b>\n"
+        f"Средний KDA: <b>{avg_kda:.2f}</b>\n"
+        f"Средний net worth: <b>{avg_souls:.0f}</b>\n"
+        f"Средние last hits: <b>{avg_last_hits:.1f}</b>\n"
+        f"Частые герои: <b>{top_heroes_text}</b>",
         parse_mode="HTML",
     )
 
@@ -83,23 +125,11 @@ async def _send_last_match(message: Message, player_id: str) -> None:
         return
 
     latest = matches[0]
-    match_id = str(latest.get("match_id") or latest.get("id") or "")
-    parsed = None
-
-    if match_id:
-        try:
-            match_payload = await api.get_match(match_id)
-            parsed = api.parse_match_for_player(match_payload, player_id)
-        except DeadlockApiUnsupportedRouteError:
-            parsed = api.parse_match_for_player(latest, player_id)
-        except DeadlockApiNotFoundError:
-            parsed = api.parse_match_for_player(latest, player_id)
-
-    if parsed is None:
-        parsed = api.parse_match_for_player(latest, player_id)
+    parsed = api.parse_match_for_player(latest, player_id)
+    match_id = str(parsed["match_id"] or latest.get("match_id") or latest.get("id") or "unknown")
 
     summary = MatchSummary(
-        match_id=parsed["match_id"] or match_id or "unknown",
+        match_id=match_id,
         match_datetime=datetime.fromisoformat(parsed["match_datetime"].replace("Z", "+00:00")),
         hero_name=parsed["hero_name"],
         is_win=parsed["is_win"],
@@ -123,7 +153,7 @@ async def _send_last_match(message: Message, player_id: str) -> None:
 
     await message.answer_photo(
         photo=FSInputFile(card_path),
-        caption="Последний матч сформирован вручную.",
+        caption="Последний матч сформирован по истории матчей.",
         reply_markup=report_actions_keyboard(player_id, summary.match_id),
     )
 

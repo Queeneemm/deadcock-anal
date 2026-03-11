@@ -31,8 +31,7 @@ class DeadlockApiUnsupportedRouteError(DeadlockApiError):
 
 @dataclass(frozen=True, slots=True)
 class DeadlockApiRoutes:
-    match_history: str = "match-history/{account_id}"
-    steam_profile: str = "steam-profile/{account_id}"
+    match_history: str = "players/{account_id}/match-history"
     # TODO: подтвердить реальный маршрут деталей матча и задать его здесь.
     match_details: str | None = None
 
@@ -162,10 +161,38 @@ class DeadlockApiClient:
 
     async def get_player_profile(self, player_id: str) -> dict[str, Any]:
         account_id = self.normalize_account_id(player_id)
-        data = await self._request("GET", self.routes.steam_profile.format(account_id=account_id))
-        if isinstance(data, dict):
-            return data
-        return {"account_id": account_id}
+        matches = await self.get_match_history(account_id)
+        if not matches:
+            return {
+                "account_id": account_id,
+                "display_name": f"Игрок {account_id}",
+                "matches_count": 0,
+            }
+
+        recent = matches[:20]
+        parsed = [self.parse_match_for_player(item, account_id) for item in recent]
+        avg_kda = sum((m["kills"] + m["assists"]) / max(m["deaths"], 1) for m in parsed) / len(parsed)
+        avg_souls = sum(int(m["souls"]) for m in parsed) / len(parsed)
+        avg_last_hits = sum(int(item.get("last_hits") or 0) for item in recent) / len(recent)
+        wins = sum(1 for m in parsed if m["is_win"])
+
+        hero_freq: dict[str, int] = {}
+        for m in parsed:
+            hero_name = str(m["hero_name"])
+            hero_freq[hero_name] = hero_freq.get(hero_name, 0) + 1
+
+        top_heroes = sorted(hero_freq.items(), key=lambda kv: kv[1], reverse=True)[:3]
+        return {
+            "account_id": account_id,
+            "display_name": f"Игрок {account_id}",
+            "matches_count": len(recent),
+            "avg_kda": round(avg_kda, 2),
+            "avg_net_worth": round(avg_souls, 1),
+            "avg_last_hits": round(avg_last_hits, 1),
+            "top_heroes": [{"hero_name": hero, "matches": count} for hero, count in top_heroes],
+            "winrate": round((wins / len(parsed)) * 100, 1),
+            "profile_source": "match_history_fallback",
+        }
 
     async def get_match(self, match_id: str) -> dict[str, Any]:
         if not self.routes.match_details:
@@ -176,38 +203,60 @@ class DeadlockApiClient:
         return data if isinstance(data, dict) else {}
 
     async def resolve_player(self, query: str) -> list[dict[str, Any]]:
-        raise DeadlockApiUnsupportedRouteError(
-            "Поиск игрока по нику отключён: маршрут не подтверждён (старый /players/search удалён)."
+        normalized = query.strip()
+        if not normalized:
+            return []
+
+        if normalized.isdigit():
+            return [{"account_id": self.normalize_account_id(normalized), "source": "numeric"}]
+
+        if re.match(r"^https?://steamcommunity\.com/profiles/\d+/?", normalized, flags=re.IGNORECASE):
+            account_id = await self.resolve_steam_profile_to_account_id(normalized)
+            return [{"account_id": account_id, "source": "steamcommunity_profiles"}] if account_id else []
+
+        if re.match(r"^https?://steamcommunity\.com/id/[A-Za-z0-9_\-]+/?", normalized, flags=re.IGNORECASE):
+            account_id = await self.resolve_steam_profile_to_account_id(normalized)
+            return [{"account_id": account_id, "source": "steamcommunity_id"}] if account_id else []
+
+        raise DeadlockApiError(
+            "Поддерживаются только account_id, Steam64 или ссылки steamcommunity.com/profiles/... и /id/..."
         )
 
     @staticmethod
     def parse_match_for_player(match_payload: dict[str, Any], player_id: str) -> dict[str, Any]:
-        player_stats = next(
-            (
-                p
-                for p in match_payload.get("players", [])
-                if str(p.get("player_id") or p.get("account_id")) == str(player_id)
-            ),
-            {},
-        )
-        started_at = (
-            match_payload.get("started_at")
-            or match_payload.get("start_time")
-            or datetime.now(timezone.utc).isoformat()
-        )
+        _ = player_id
+        start_time = match_payload.get("start_time")
+        if isinstance(start_time, (int, float)):
+            started_at = datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        else:
+            started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        hero_id = match_payload.get("hero_id")
+        hero_name = f"Hero #{hero_id}" if hero_id is not None else "Неизвестный герой"
+        match_result = str(match_payload.get("match_result") or "").lower()
+        player_team = str(match_payload.get("player_team") or "").lower()
+
+        is_win = False
+        if match_result in {"win", "won", "victory", "true", "1"}:
+            is_win = True
+        elif match_result in {"loss", "lose", "lost", "defeat", "false", "0"}:
+            is_win = False
+        elif match_result and player_team and match_result == player_team:
+            is_win = True
+
         return {
             "match_id": str(match_payload.get("match_id") or match_payload.get("id") or ""),
             "match_datetime": started_at,
-            "duration_seconds": int(match_payload.get("duration_seconds") or match_payload.get("duration") or 0),
-            "hero_name": str(player_stats.get("hero_name") or match_payload.get("hero_name") or "Неизвестный герой"),
-            "is_win": bool(player_stats.get("is_win") or match_payload.get("is_win") or False),
-            "kills": int(player_stats.get("kills") or match_payload.get("kills") or 0),
-            "deaths": int(player_stats.get("deaths") or match_payload.get("deaths") or 0),
-            "assists": int(player_stats.get("assists") or match_payload.get("assists") or 0),
-            "souls": int(player_stats.get("souls") or match_payload.get("souls") or 0),
-            "damage": int(player_stats.get("damage") or match_payload.get("damage") or 0),
-            "items": [str(i) for i in (player_stats.get("items") or match_payload.get("items") or [])][:6],
-            "team_damage_rank": player_stats.get("team_damage_rank"),
-            "team_souls_rank": player_stats.get("team_souls_rank"),
+            "duration_seconds": int(match_payload.get("match_duration_s") or match_payload.get("duration_seconds") or 0),
+            "hero_name": hero_name,
+            "is_win": is_win,
+            "kills": int(match_payload.get("player_kills") or 0),
+            "deaths": int(match_payload.get("player_deaths") or 0),
+            "assists": int(match_payload.get("player_assists") or 0),
+            "souls": int(match_payload.get("net_worth") or 0),
+            "damage": 0,
+            "items": [],
+            "team_damage_rank": None,
+            "team_souls_rank": None,
             "raw_payload": match_payload,
         }

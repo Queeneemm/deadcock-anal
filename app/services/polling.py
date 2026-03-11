@@ -5,13 +5,7 @@ from datetime import datetime
 from aiogram import Bot
 from aiogram.types import FSInputFile
 
-from app.clients.deadlock_api import (
-    DeadlockApiClient,
-    DeadlockApiError,
-    DeadlockApiNotFoundError,
-    DeadlockApiTemporaryError,
-    DeadlockApiUnsupportedRouteError,
-)
+from app.clients.deadlock_api import DeadlockApiClient, DeadlockApiError, DeadlockApiNotFoundError, DeadlockApiTemporaryError
 from app.keyboards.inline import report_actions_keyboard
 from app.models import MatchSummary, TrackedPlayer
 from app.repositories.matches import MatchesRepository, ReportsRepository
@@ -87,10 +81,7 @@ class PollingService:
             if self.reports_repo.was_sent(tracked.telegram_user_id, tracked.player_id, match_id):
                 continue
 
-            parsed = await self._get_match_data_for_player(tracked.player_id, raw, match_id)
-            if not parsed:
-                continue
-
+            parsed = self.api.parse_match_for_player(raw, tracked.player_id)
             summary = MatchSummary(
                 match_id=parsed["match_id"] or match_id,
                 match_datetime=datetime.fromisoformat(parsed["match_datetime"].replace("Z", "+00:00")),
@@ -134,20 +125,3 @@ class PollingService:
             self.reports_repo.mark_sent(tracked.telegram_user_id, tracked.player_id, match_id)
             self.players_repo.update_last_seen_match(tracked.id, match_id)
             self.players_repo.update_last_sent_match(tracked.id, match_id)
-
-    async def _get_match_data_for_player(self, player_id: str, history_item: dict, match_id: str) -> dict | None:
-        try:
-            full_match = await self.api.get_match(match_id)
-            return self.api.parse_match_for_player(full_match, player_id)
-        except DeadlockApiUnsupportedRouteError:
-            self._warn_once("unsupported:match_details", "Детали матча отключены: маршрут не подтверждён, используем match-history")
-            return self.api.parse_match_for_player(history_item, player_id)
-        except DeadlockApiNotFoundError:
-            self._warn_once(f"match404:{match_id}", "Матч %s не найден, используем данные из match-history", match_id)
-            return self.api.parse_match_for_player(history_item, player_id)
-        except DeadlockApiTemporaryError:
-            logger.info("Временная ошибка при чтении матча %s", match_id)
-            return self.api.parse_match_for_player(history_item, player_id)
-        except DeadlockApiError:
-            logger.exception("Не удалось обработать матч %s", match_id)
-            return None

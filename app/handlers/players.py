@@ -5,12 +5,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from app.clients.deadlock_api import (
-    DeadlockApiClient,
-    DeadlockApiError,
-    DeadlockApiNotFoundError,
-    DeadlockApiUnsupportedRouteError,
-)
+from app.clients.deadlock_api import DeadlockApiClient, DeadlockApiError
 from app.keyboards.inline import (
     MAIN_MENU_ADD_PLAYER,
     MAIN_MENU_HELP,
@@ -41,12 +36,14 @@ async def cmd_addplayer(message: Message) -> None:
     users_repo.ensure_user(message.from_user.id)
     args = (message.text or "").split(maxsplit=1)
     if len(args) < 2:
-        await message.answer("Использование: <code>/addplayer account_id|steam_profile_url</code>", parse_mode="HTML")
+        await message.answer(
+            "Использование: <code>/addplayer account_id|Steam64|steamcommunity_url</code>",
+            parse_mode="HTML",
+        )
         return
 
     query = args[1].strip()
     account_id: str | None = None
-    display_name = query
 
     try:
         if re.match(r"^https?://steamcommunity\.com/(profiles|id)/", query, flags=re.IGNORECASE):
@@ -57,36 +54,25 @@ async def cmd_addplayer(message: Message) -> None:
         elif query.isdigit():
             account_id = api.normalize_account_id(query)
         else:
-            # Маршрут поиска не подтверждён — оставляем мягкий fallback.
-            await api.resolve_player(query)
-    except DeadlockApiUnsupportedRouteError:
-        await message.answer(
-            "Поиск по нику отключён: маршрут поиска не подтверждён в API. "
-            "Используйте account_id или ссылку на Steam-профиль.",
-        )
-        return
+            await message.answer(
+                "Поиск по нику пока не поддерживается. "
+                "Укажите account_id, Steam64 или ссылку на steamcommunity.com/profiles/... (или /id/...)."
+            )
+            return
     except (DeadlockApiError, ValueError):
         logger.exception("Ошибка при добавлении игрока: %s", query)
-        await message.answer("Не удалось обработать ввод. Укажите корректный account_id или ссылку Steam.")
+        await message.answer("Не удалось обработать ввод. Укажите корректный account_id, Steam64 или ссылку Steam.")
         return
 
     if not account_id:
-        await message.answer("Не удалось определить account_id. Используйте число account_id или ссылку Steam.")
+        await message.answer("Не удалось определить account_id. Используйте account_id, Steam64 или ссылку Steam.")
         return
 
     try:
         profile = await api.get_player_profile(account_id)
-        display_name = str(
-            profile.get("display_name")
-            or profile.get("personaname")
-            or profile.get("name")
-            or account_id
-        )
-    except DeadlockApiNotFoundError:
-        logger.info("Профиль не найден для account_id=%s, сохраним ID как имя", account_id)
-        display_name = account_id
+        display_name = str(profile.get("display_name") or account_id)
     except DeadlockApiError:
-        logger.warning("Не удалось получить профиль для account_id=%s", account_id)
+        logger.warning("Не удалось получить fallback-профиль для account_id=%s", account_id)
         display_name = account_id
 
     created = players_repo.add_player(message.from_user.id, account_id, display_name)
@@ -146,6 +132,7 @@ async def cmd_track(message: Message) -> None:
 async def btn_add_player(message: Message) -> None:
     await message.answer(
         "Отправьте: <code>/addplayer account_id</code> "
+        "или <code>/addplayer Steam64</code> "
         "или <code>/addplayer https://steamcommunity.com/...</code>",
         parse_mode="HTML",
     )

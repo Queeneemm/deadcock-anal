@@ -2,18 +2,24 @@
 
 Telegram-бот на Python 3.11+ для отслеживания матчей Deadlock, аналитики и отправки PNG-карточек.
 
-## Что было исправлено в интеграции API
+## Что актуально по интеграции API
 
-Ранее проект использовал неподтверждённые маршруты `players/...`:
-- `/players/search?q=...`
-- `/players/recent-matches?player_id=...`
+Проект использует только подтверждённый маршрут истории матчей:
+- `GET /v1/players/{account_id}/match-history`
+
+Подтверждённые сервисные маршруты для ручной проверки:
+- `/openapi.json`
+- `/docs`
+- `/v1/info`
+
+Неподтверждённые/старые маршруты больше не используются:
+- `/players/search`
+- `/players/recent-matches`
 - `/players/{id}`
-
-Эти маршруты удалены из кода. Теперь клиент использует только подтверждённые пути:
 - `/match-history/{account_id}`
 - `/steam-profile/{account_id}`
 
-Проект переведён на поток `account_id` (вместо вымышленных player endpoints). SteamID64 поддерживается и автоматически преобразуется в `account_id`.
+Профиль игрока в боте теперь строится по истории матчей (fallback-режим), а расширенные детали матча также работают в fallback-режиме без выдуманных данных.
 
 ## Возможности
 - Отслеживание нескольких игроков на одного Telegram-пользователя.
@@ -66,18 +72,39 @@ python -m app.bot
 ```
 
 ## Команды бота
-- `/addplayer <account_id|steam_profile_url>`
+- `/addplayer <account_id|Steam64|steam_profile_url>`
 - `/players`
 - `/removeplayer <account_id>`
 - `/track <account_id> <on|off>`
 - `/lastmatch <account_id>`
 - `/profile <account_id>`
 
+> Поиск игрока по нику через API отключён: используйте только `account_id`, `Steam64` или ссылку `steamcommunity`.
+
 ## Поток идентификаторов
 - Основной идентификатор внутри проекта: `account_id`.
 - Если пользователь вводит SteamID64, бот преобразует его в `account_id`.
 - Если пользователь вводит ссылку `steamcommunity.com/profiles/...` или `steamcommunity.com/id/...`, бот извлекает SteamID64 и затем преобразует его в `account_id`.
 - В БД исторически используется имя поля `player_id`, но фактически в нём хранится `account_id`.
+
+## Как вручную проверить API через curl
+
+Пусть:
+- `BASE_URL` — базовый URL (например, `https://deadlock-api.example.com`)
+- `ACCOUNT_ID` — numeric account_id
+
+```bash
+curl -sS "$BASE_URL/v1/info"
+curl -sS "$BASE_URL/openapi.json"
+curl -sS "$BASE_URL/docs"
+curl -sS "$BASE_URL/v1/players/$ACCOUNT_ID/match-history"
+```
+
+Примеры поддерживаемого ввода для `/addplayer`:
+- `123456789` (account_id)
+- `7656119...` (Steam64, будет конвертирован)
+- `https://steamcommunity.com/profiles/7656119...`
+- `https://steamcommunity.com/id/vanity_name`
 
 ## Обработка ошибок API
 
@@ -90,14 +117,7 @@ python -m app.bot
 Поведение:
 - Хендлеры `/addplayer`, `/lastmatch`, `/profile` не падают при API-ошибках.
 - Polling не спамит одинаковыми 404 в логах (повторные предупреждения подавляются).
-- При неподтверждённом маршруте деталей матча используется мягкий fallback на данные из `match-history`.
-
-## Что делать, если маршруты API отличаются от ожидаемых
-
-1. Откройте `app/clients/deadlock_api.py`.
-2. Измените только структуру `DeadlockApiRoutes`.
-3. Не добавляйте маршруты «наугад». Сначала подтвердите их по документации/источнику.
-4. Если новый маршрут не подтверждён, оставьте `None` и используйте fallback через `DeadlockApiUnsupportedRouteError`.
+- Если деталей матча нет, используется parsing из `match-history`.
 
 ## Структура проекта
 ```text
