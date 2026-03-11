@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import mean
 
 from app.models import AnalyticsResult, MatchSummary
+from app.services.heroes import hero_name_by_id
 
 
 class AnalyticsService:
@@ -14,7 +15,7 @@ class AnalyticsService:
         week_matches: list[MatchSummary],
     ) -> AnalyticsResult:
         bad_points = self._build_bad_points(current, hero_history)
-        improved_points = self._build_improvements(current, recent_matches)
+        improved_points = self._build_improvements(current, recent_matches, hero_history)
         anti_tilt = self._build_anti_tilt(current, hero_history)
         best_hero_week = self._best_hero_week(week_matches)
         return AnalyticsResult(
@@ -52,7 +53,13 @@ class AnalyticsService:
 
         return points[:3] or ["Явных провалов нет — матч был нестабильным по темпу."]
 
-    def _build_improvements(self, current: MatchSummary, recent_matches: list[MatchSummary]) -> list[str]:
+    def _build_improvements(
+        self, current: MatchSummary, recent_matches: list[MatchSummary], hero_history: list[MatchSummary]
+    ) -> list[str]:
+        hero_sample = [m for m in hero_history if m.match_id != current.match_id]
+        if not hero_sample:
+            return ["Недостаточно истории по этому герою для сравнения прогресса."]
+
         prev = next((m for m in recent_matches if m.match_id != current.match_id), None)
         if not prev:
             return ["Нет предыдущего матча для сравнения."]
@@ -78,19 +85,20 @@ class AnalyticsService:
         if not filtered:
             return {"hero_name": "Нет данных", "matches": 0, "winrate": 0.0}
 
-        by_hero: dict[str, list[MatchSummary]] = defaultdict(list)
+        by_hero: dict[int, list[MatchSummary]] = defaultdict(list)
         for match in filtered:
-            by_hero[match.hero_name].append(match)
+            hero_id = match.hero_id or int((match.raw_payload or {}).get("hero_id") or 0)
+            by_hero[hero_id].append(match)
 
         candidates = []
-        for hero, matches in by_hero.items():
+        for hero_id, matches in by_hero.items():
             wins = sum(1 for m in matches if m.is_win)
             winrate = wins / len(matches)
             kda = mean((m.kills + m.assists) / max(m.deaths, 1) for m in matches)
-            candidates.append((hero, len(matches), winrate, kda))
+            candidates.append((hero_id, len(matches), winrate, kda))
 
-        hero, count, winrate, _ = sorted(candidates, key=lambda x: (x[2], x[1], x[3]), reverse=True)[0]
-        return {"hero_name": hero, "matches": count, "winrate": round(winrate * 100, 1)}
+        hero_id, count, winrate, _ = sorted(candidates, key=lambda x: (x[2], x[1], x[3]), reverse=True)[0]
+        return {"hero_name": hero_name_by_id(hero_id), "matches": count, "winrate": round(winrate * 100, 1)}
 
     def _build_anti_tilt(self, current: MatchSummary, hero_history: list[MatchSummary]) -> str:
         kda = (current.kills + current.assists) / max(current.deaths, 1)
