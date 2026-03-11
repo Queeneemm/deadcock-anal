@@ -47,6 +47,7 @@ class DeadlockApiRoutes:
     analytics_hero_counter: str = "analytics/hero-counter-stats"
     analytics_hero_stats: str = "analytics/hero-stats"
     patches: str = "patches"
+    patches_big_days: str = "patches/big-days"
     info: str = "info"
 
 
@@ -150,7 +151,7 @@ class DeadlockApiClient:
         if isinstance(data, list):
             return [item for item in data if isinstance(item, dict)]
         if isinstance(data, dict):
-            for key in ("players", "results", "data", "items", "matches", "hero_stats", "stats"):
+            for key in ("players", "results", "data", "items", "matches", "hero_stats", "stats", "party_stats", "days"):
                 value = data.get(key)
                 if isinstance(value, list):
                     return [item for item in value if isinstance(item, dict)]
@@ -327,6 +328,10 @@ class DeadlockApiClient:
 
     async def get_patches(self) -> list[dict[str, Any]]:
         data = await self._request("GET", self.routes.patches)
+        return self._extract_list_payload(data)
+
+    async def get_patch_big_days(self) -> list[dict[str, Any]]:
+        data = await self._request("GET", self.routes.patches_big_days)
         return self._extract_list_payload(data)
 
     async def get_player_profile(self, player_id: str) -> dict[str, Any]:

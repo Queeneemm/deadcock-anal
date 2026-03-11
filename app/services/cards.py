@@ -85,3 +85,28 @@ class CardRenderer:
         output = self.output_dir / f"match_{summary.match_id}_{player_name}.png"
         card.convert("RGB").save(output, "PNG")
         return output
+
+    async def render_dashboard(self, player_name: str, hero_id: int, rows: list[tuple[str, str]]) -> Path:
+        card = Image.new("RGBA", (1080, 1350), (18, 20, 28, 255))
+        draw = ImageDraw.Draw(card)
+        font_title = get_font(44, bold=True)
+        font_text = get_font(30, bold=True)
+        font_small = get_font(24)
+
+        hero_asset = await self.assets_client.get_hero_asset_by_id(hero_id)
+        hero_img = crop_cover(load_rgba(hero_asset), (1080, 1350))
+        card.alpha_composite(hero_img, (0, 0))
+        card.alpha_composite(Image.new("RGBA", (1080, 1350), (10, 12, 16, 175)), (0, 0))
+        card.alpha_composite(rounded_rectangle_overlay((1020, 120), 24, (25, 27, 36, 210)), (30, 30))
+        draw.text((60, 68), safe_text(f"Дашборд: {player_name}", font_title), fill=(255, 255, 255), font=font_title)
+
+        y = 190
+        for title, value in rows:
+            card.alpha_composite(rounded_rectangle_overlay((1020, 140), 18, (20, 22, 30, 220)), (30, y))
+            draw.text((60, y + 18), safe_text(title, font_text), fill=(220, 220, 220), font=font_text)
+            draw.text((60, y + 72), safe_text(shorten(value, width=90, placeholder="…"), font_small), fill=(255, 255, 255), font=font_small)
+            y += 155
+
+        output = self.output_dir / f"dashboard_{player_name}.png"
+        card.convert("RGB").save(output, "PNG")
+        return output

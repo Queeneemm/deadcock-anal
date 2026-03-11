@@ -1,11 +1,20 @@
 from datetime import datetime
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, FSInputFile, Message
 
 from app.clients.deadlock_api import DeadlockApiClient, DeadlockApiError, DeadlockApiNotFoundError, DeadlockApiTemporaryError
-from app.keyboards.inline import player_select_keyboard, report_actions_keyboard
+from app.keyboards.inline import (
+    MAIN_MENU_DASHBOARD,
+    MAIN_MENU_LAST_MATCH,
+    MAIN_MENU_PATCHNOTES,
+    MAIN_MENU_PROFILE,
+    analytics_actions_keyboard,
+    patches_keyboard,
+    player_select_keyboard,
+    report_actions_keyboard,
+)
 from app.models import MatchSummary
 from app.repositories.matches import MatchesRepository
 from app.repositories.players import TrackedPlayersRepository
@@ -97,6 +106,9 @@ async def _resolve_command_account(message: Message, explicit_account: str | Non
     if not tracked:
         await message.answer("У вас нет сохранённых игроков. Добавьте через /addplayer.")
         return None
+    default = players_repo.get_default_player(message.from_user.id)
+    if default:
+        return default.player_id
     if len(tracked) == 1:
         return tracked[0].player_id
 
@@ -240,10 +252,34 @@ async def _send_last_match(message: Message, player_id: str) -> None:
     analysis = analytics.analyze(summary, recent, hero, week)
     card_path = await cards.render(account_id, summary, analysis)
 
+    previous_match_id = str(recent[1].match_id) if len(recent) > 1 else None
+
     await message.answer_photo(
         photo=FSInputFile(card_path),
         caption="Последний матч сформирован по /players/{account_id}/match-history.",
-        reply_markup=report_actions_keyboard(account_id, summary.match_id),
+        reply_markup=report_actions_keyboard(account_id, summary.match_id, previous_match_id),
+    )
+
+
+async def _send_match_details(message: Message, player_id: str, match_id: str) -> None:
+    api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
+    account_id = api.normalize_account_id(player_id)
+    history = await api.get_player_recent_matches(account_id, limit=30)
+    target = next((m for m in history if str(m.get("match_id") or m.get("id")) == str(match_id)), None)
+    if not target:
+        await message.answer("Не нашёл этот матч в недавней истории.")
+        return
+    parsed = api.parse_match_for_player(target, account_id)
+    await message.answer(
+        f"<b>Подробнее о матче</b> <code>{match_id}</code>\n"
+        f"Герой: <b>{parsed['hero_name']}</b>\n"
+        f"Результат: <b>{'Победа' if parsed['is_win'] else 'Поражение'}</b>\n"
+        f"K/D/A: <b>{parsed['kills']}/{parsed['deaths']}/{parsed['assists']}</b>\n"
+        f"Души: <b>{parsed['souls']}</b>\n"
+        f"Урон: <b>{parsed['damage']}</b>\n"
+        f"Длительность: <b>{parsed['duration_seconds'] // 60} мин</b>",
+        parse_mode="HTML",
+        reply_markup=analytics_actions_keyboard(),
     )
 
 
@@ -258,14 +294,27 @@ async def _send_relation_stats(message: Message, account_id: str, mode: str) -> 
 
     ids: list[str] = []
     for item in raw:
-        other = item.get("account_id") or item.get("other_account_id") or item.get("player_account_id")
+        other = (
+            item.get("account_id")
+            or item.get("other_account_id")
+            or item.get("player_account_id")
+            or item.get("teammate_account_id")
+            or item.get("mate_account_id")
+        )
         if other is not None and str(other).isdigit():
             ids.append(api.normalize_account_id(other))
+    ids.append(account_id)
 
     steam_map = {entry["account_id"]: entry for entry in [api._map_steam_profile(p) for p in (await api.get_steam_profiles(ids) if ids else [])] if entry.get("account_id")}
     lines = [f"<b>{title}</b> для <code>{account_id}</code>"]
     for item in raw[:10]:
-        other = item.get("account_id") or item.get("other_account_id") or item.get("player_account_id")
+        other = (
+            item.get("account_id")
+            or item.get("other_account_id")
+            or item.get("player_account_id")
+            or item.get("teammate_account_id")
+            or item.get("mate_account_id")
+        )
         if other is None or not str(other).isdigit():
             continue
         normalized = api.normalize_account_id(other)
@@ -329,16 +378,22 @@ async def cmd_besthero(message: Message) -> None:
     if not player_id:
         return
     stats = await api.get_player_hero_stats([api.normalize_account_id(player_id)])
-    best = max(stats, key=lambda x: (_extract_winrate(x), int(x.get("matches_played") or x.get("matches") or 0)), default=None)
-    if not best:
+    top3 = sorted(
+        stats,
+        key=lambda x: (_extract_winrate(x), int(x.get("matches_played") or x.get("matches") or 0)),
+        reverse=True,
+    )[:3]
+    if not top3:
         await message.answer("Недостаточно данных по героям.")
         return
-    await message.answer(
-        f"Лучший герой: <b>{hero_name_by_id(best.get('hero_id'))}</b>\n"
-        f"Матчей: <b>{best.get('matches_played') or best.get('matches') or 0}</b>\n"
-        f"Winrate: <b>{_format_winrate(best)}</b>",
-        parse_mode="HTML",
-    )
+    lines = ["<b>Топ 3 ваших героев</b>"]
+    for i, hero in enumerate(top3, start=1):
+        lines.append(
+            f"{i}) <b>{hero_name_by_id(hero.get('hero_id'))}</b> — WR <b>{_format_winrate(hero)}</b>, "
+            f"матчей <b>{hero.get('matches_played') or hero.get('matches') or 0}</b>, "
+            f"KDA <b>{hero.get('kills') or 0}/{hero.get('deaths') or 0}/{hero.get('assists') or 0}</b>"
+        )
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("hero"))
@@ -483,20 +538,52 @@ async def cmd_leaderboard(message: Message) -> None:
 @router.message(Command("patches"))
 async def cmd_patches(message: Message) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
-    patches = await api.get_patches()
-    if not patches:
-        await message.answer("No patch data available right now.")
-        return
+    days = await api.get_patch_big_days()
+    lines = ["<b>Последние даты патчей</b>"]
+    for day in days[:8]:
+        lines.append(f"• {day.get('date') or day.get('day') or day.get('label') or str(day)}")
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=patches_keyboard())
 
-    lines = ["<b>Latest Deadlock patches</b>"]
-    for patch in patches[:8]:
-        version = patch.get("title") or patch.get("version") or patch.get("name") or patch.get("patch") or "Unknown version"
-        ts = patch.get("pub_date") or patch.get("released_at") or patch.get("release_date") or patch.get("date")
-        if ts:
-            lines.append(f"• <b>{version}</b> — {ts}")
-        else:
-            lines.append(f"• <b>{version}</b>")
-    await message.answer("\n".join(lines), parse_mode="HTML")
+
+@router.message(Command("dashboard"))
+async def cmd_dashboard(message: Message) -> None:
+    api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
+    cards: CardRenderer = router.cards  # type: ignore[attr-defined]
+    player_id = await _resolve_command_account(message, _pick_account_from_text(message.text or ""), "dashboard")
+    if not player_id:
+        return
+    account_id = api.normalize_account_id(player_id)
+    history = await api.get_player_recent_matches(account_id, limit=20)
+    if not history:
+        await message.answer("Нет матчей для дашборда.")
+        return
+    parsed = [api.parse_match_for_player(m, account_id) for m in history]
+    last = parsed[0]
+    mmr_stats = await api.get_player_mmr([account_id])
+    mmr = _format_mmr(mmr_stats[0] if mmr_stats else None)
+    week_best = hero_name_by_id(last.get("hero_id"))
+    wr10 = round((sum(1 for m in parsed[:10] if m["is_win"]) / max(len(parsed[:10]), 1)) * 100, 1)
+    mates = await api.get_player_mate_stats(account_id)
+    best_mate = "—"
+    if mates:
+        best = max(mates, key=lambda x: _extract_winrate(x))
+        best_mate = str(best.get("account_id") or best.get("teammate_account_id") or "—")
+    meta = await api.get_global_hero_stats()
+    top_meta = sorted(meta, key=lambda x: _extract_winrate(x), reverse=True)[:3]
+    rec = ", ".join(hero_name_by_id(m.get("hero_id")) for m in top_meta)
+    img = await cards.render_dashboard(
+        account_id,
+        int(last.get("hero_id") or 1),
+        [
+            ("Последний матч", f"{last['hero_name']} | {'Победа' if last['is_win'] else 'Поражение'} | KDA {last['kills']}/{last['deaths']}/{last['assists']}"),
+            ("Текущий MMR", mmr),
+            ("Лучший герой недели", week_best),
+            ("Винрейт за 10 игр", f"{wr10}%"),
+            ("Лучший тиммейт", best_mate),
+            ("Мета-рекомендация", rec or "—"),
+        ],
+    )
+    await message.answer_photo(FSInputFile(img), caption=f"Дашборд по игроку <code>{account_id}</code>", parse_mode="HTML")
 
 
 
@@ -694,13 +781,77 @@ async def cb_profile(callback: CallbackQuery) -> None:
 
 @router.callback_query(lambda c: c.data and c.data.startswith("details:"))
 async def cb_details(callback: CallbackQuery) -> None:
-    _, _, match_id = callback.data.split(":", maxsplit=2)
-    await callback.answer(f"Детали матча {match_id} пока в разработке.")
+    _, player_id, match_id = callback.data.split(":", maxsplit=2)
+    await _send_match_details(callback.message, player_id, match_id)
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("prev:"))
 async def cb_prev(callback: CallbackQuery) -> None:
-    await callback.answer("Переход к предыдущему матчу пока в разработке.")
+    _, player_id, match_id = callback.data.split(":", maxsplit=2)
+    await _send_match_details(callback.message, player_id, match_id)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("patch:"))
+async def cb_patch_actions(callback: CallbackQuery) -> None:
+    api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
+    action = callback.data.split(":", maxsplit=1)[1]
+    if action == "last":
+        patches = await api.get_patches()
+        if not patches:
+            await callback.message.answer("Нет данных по патчам.")
+            await callback.answer()
+            return
+        patch = patches[0]
+        title = patch.get("title") or patch.get("version") or "Последний патч"
+        body = patch.get("description") or patch.get("summary") or patch.get("content") or "Краткое описание недоступно."
+        await callback.message.answer(f"<b>{title}</b>\n{body}", parse_mode="HTML", reply_markup=patches_keyboard())
+    elif action == "myheroes":
+        player_id = await _resolve_command_account(callback.message, None, "besthero")
+        if not player_id:
+            await callback.answer()
+            return
+        stats = await api.get_player_hero_stats([api.normalize_account_id(player_id)])
+        top3 = sorted(stats, key=lambda x: (_extract_winrate(x), int(x.get("matches_played") or x.get("matches") or 0)), reverse=True)[:3]
+        patches = await api.get_patches()
+        text_blob = str(patches[0]) if patches else ""
+        lines = ["<b>Изменения моих топ-3 героев</b>"]
+        for hero in top3:
+            name = hero_name_by_id(hero.get("hero_id"))
+            lines.append(f"• {name}: {'есть изменения' if name.lower() in text_blob.lower() else 'изменений не найдено'}")
+        await callback.message.answer("\n".join(lines), parse_mode="HTML", reply_markup=patches_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("back:"))
+async def cb_back(callback: CallbackQuery) -> None:
+    target = callback.data.split(":", maxsplit=1)[1]
+    if target == "analytics":
+        await callback.message.answer("Раздел аналитики:", reply_markup=analytics_actions_keyboard())
+    else:
+        await callback.message.answer("Главное меню открыто.")
+    await callback.answer()
+
+
+@router.message(F.text == MAIN_MENU_LAST_MATCH)
+async def btn_lastmatch(message: Message) -> None:
+    await cmd_lastmatch(message)
+
+
+@router.message(F.text == MAIN_MENU_PROFILE)
+async def btn_profile(message: Message) -> None:
+    await cmd_profile(message)
+
+
+@router.message(F.text == MAIN_MENU_PATCHNOTES)
+async def btn_patchnotes(message: Message) -> None:
+    await cmd_patches(message)
+
+
+@router.message(F.text == MAIN_MENU_DASHBOARD)
+async def btn_dashboard(message: Message) -> None:
+    await cmd_dashboard(message)
 
 
 @router.error()
