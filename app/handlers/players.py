@@ -1,10 +1,18 @@
 import logging
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from app.clients.deadlock_api import DeadlockApiClient
+from app.keyboards.inline import (
+    MAIN_MENU_ADD_PLAYER,
+    MAIN_MENU_HELP,
+    MAIN_MENU_LAST_MATCH,
+    MAIN_MENU_PLAYERS,
+    MAIN_MENU_PROFILE,
+    players_management_keyboard,
+)
 from app.repositories.players import TrackedPlayersRepository
 from app.repositories.users import UsersRepository
 
@@ -64,11 +72,14 @@ async def cmd_players(message: Message) -> None:
         await message.answer("Пока нет отслеживаемых игроков. Добавьте через /addplayer.")
         return
 
-    lines = ["<b>Ваши отслеживаемые игроки:</b>"]
+    await message.answer("<b>Ваши отслеживаемые игроки:</b>", parse_mode="HTML")
     for p in players:
         status = "✅ автоотчёты" if p.auto_reports_enabled else "⏸ автоотчёты выключены"
-        lines.append(f"• <b>{p.display_name}</b> (<code>{p.player_id}</code>) — {status}")
-    await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer(
+            f"• <b>{p.display_name}</b> (<code>{p.player_id}</code>) — {status}",
+            parse_mode="HTML",
+            reply_markup=players_management_keyboard(p.player_id, p.auto_reports_enabled),
+        )
 
 
 @router.message(Command("removeplayer"))
@@ -97,3 +108,49 @@ async def cmd_track(message: Message) -> None:
         await message.answer("Автоотслеживание обновлено.")
     else:
         await message.answer("Игрок не найден.")
+
+
+@router.message(F.text == MAIN_MENU_ADD_PLAYER)
+async def btn_add_player(message: Message) -> None:
+    await message.answer("Отправьте команду: <code>/addplayer player_id</code> или <code>/addplayer ник</code>", parse_mode="HTML")
+
+
+@router.message(F.text == MAIN_MENU_PLAYERS)
+async def btn_players(message: Message) -> None:
+    await cmd_players(message)
+
+
+@router.message(F.text == MAIN_MENU_LAST_MATCH)
+async def btn_last_match(message: Message) -> None:
+    await message.answer("Нажмите «👥 Мои игроки» и выберите «📄 Матч» у нужного игрока.")
+
+
+@router.message(F.text == MAIN_MENU_PROFILE)
+async def btn_profile(message: Message) -> None:
+    await message.answer("Нажмите «👥 Мои игроки» и выберите «🧾 Профиль» у нужного игрока.")
+
+
+@router.message(F.text == MAIN_MENU_HELP)
+async def btn_help(message: Message) -> None:
+    await message.answer("Используйте кнопки меню ниже для управления ботом или введите /help.")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("rm:"))
+async def cb_remove_player(callback: CallbackQuery) -> None:
+    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
+    player_id = callback.data.split(":", maxsplit=1)[1]
+    ok = players_repo.remove_player(callback.from_user.id, player_id)
+    await callback.answer("Игрок удалён." if ok else "Игрок не найден.")
+    if ok:
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("tg:"))
+async def cb_toggle_track(callback: CallbackQuery) -> None:
+    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
+    _, player_id, state = callback.data.split(":", maxsplit=2)
+    enabled = state == "on"
+    ok = players_repo.set_auto_reports(callback.from_user.id, player_id, enabled)
+    await callback.answer("Автоотчёты обновлены." if ok else "Игрок не найден.")
+    if ok:
+        await callback.message.edit_reply_markup(reply_markup=players_management_keyboard(player_id, enabled))
