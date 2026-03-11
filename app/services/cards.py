@@ -26,7 +26,7 @@ class CardRenderer:
         font_text = ImageFont.load_default(size=28)
         font_small = ImageFont.load_default(size=22)
 
-        hero_asset = await self.assets_client.get_hero_assets(summary.hero_name)
+        hero_asset = await self.assets_client.get_hero_asset_by_id(summary.hero_id or 0)
         hero_img = crop_cover(load_rgba(hero_asset), (1080, 1350))
         card.alpha_composite(hero_img, (0, 0))
         card.alpha_composite(Image.new("RGBA", (1080, 1350), (10, 12, 16, 165)), (0, 0))

@@ -33,6 +33,7 @@ class MatchSummary:
     team_damage_rank: int | None = None
     team_souls_rank: int | None = None
     raw_payload: dict[str, Any] | None = None
+    hero_id: int | None = None
 
 
 @dataclass(slots=True)

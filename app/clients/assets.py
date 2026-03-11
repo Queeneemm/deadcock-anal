@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 
 import httpx
@@ -26,6 +27,13 @@ class AssetsClient:
             response.raise_for_status()
             target.write_bytes(response.content)
             return target
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            if status in {404, 422}:
+                logger.warning("Ассет не найден (%s): %s", status, remote_path)
+            else:
+                logger.exception("HTTP ошибка при скачивании ассета: %s", remote_path)
+            return self.get_placeholder_asset()
         except Exception:
             logger.exception("Не удалось скачать ассет: %s", remote_path)
             return self.get_placeholder_asset()
@@ -37,8 +45,15 @@ class AssetsClient:
         return placeholder
 
     # TODO: сверить финальные пути ассетов c актуальной Assets API.
+    async def get_hero_asset_by_id(self, hero_id: int) -> Path:
+        if hero_id <= 0:
+            return self.get_placeholder_asset()
+        return await self._download_asset(f"heroes/{hero_id}.png", f"hero_{hero_id}.png")
+
     async def get_hero_assets(self, hero_name: str) -> Path:
-        safe = hero_name.lower().replace(" ", "_")
+        safe = re.sub(r"[^a-z0-9_\-]", "", hero_name.lower().replace(" ", "_"))
+        if not safe:
+            return self.get_placeholder_asset()
         return await self._download_asset(f"heroes/{safe}.png", f"hero_{safe}.png")
 
     async def get_item_asset(self, item_name: str) -> Path:

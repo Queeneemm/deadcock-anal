@@ -87,6 +87,7 @@ class PollingService:
                 match_datetime=datetime.fromisoformat(parsed["match_datetime"].replace("Z", "+00:00")),
                 hero_name=parsed["hero_name"],
                 is_win=parsed["is_win"],
+                hero_id=parsed.get("hero_id"),
                 kills=parsed["kills"],
                 deaths=parsed["deaths"],
                 assists=parsed["assists"],
