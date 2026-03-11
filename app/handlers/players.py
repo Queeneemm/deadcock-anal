@@ -42,6 +42,7 @@ async def cmd_addplayer(message: Message) -> None:
 
     player_id = query
     display_name = query
+    search_queries: list[str] = [query]
     if re.match(r"^https?://steamcommunity\.com/(profiles|id)/", query, flags=re.IGNORECASE):
         resolved = await api.resolve_steam_profile_to_player_id(query)
         if not resolved:
@@ -49,6 +50,14 @@ async def cmd_addplayer(message: Message) -> None:
             return
         player_id = resolved
         display_name = resolved
+        search_queries = [resolved, query]
+
+    for search_query in search_queries:
+        variants = await api.resolve_player(search_query)
+        if len(variants) == 1 and variants[0].get("player_id"):
+            player_id = str(variants[0].get("player_id"))
+            display_name = variants[0].get("display_name", display_name)
+            break
 
     if not player_id.isdigit():
         variants = await api.resolve_player(query)
