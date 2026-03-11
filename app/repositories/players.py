@@ -34,6 +34,34 @@ class TrackedPlayersRepository:
             )
             return cur.rowcount > 0
 
+    def get_default_player(self, telegram_user_id: int) -> TrackedPlayer | None:
+        with self.db.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM tracked_players WHERE telegram_user_id = ? AND is_default = 1 ORDER BY created_at DESC LIMIT 1",
+                (telegram_user_id,),
+            ).fetchone()
+        return TrackedPlayer(**dict(row)) if row else None
+
+    def set_default_player(self, telegram_user_id: int, player_id: str) -> bool:
+        with self.db.connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM tracked_players WHERE telegram_user_id = ? AND player_id = ?",
+                (telegram_user_id, player_id),
+            ).fetchone()
+            if not row:
+                return False
+            conn.execute("UPDATE tracked_players SET is_default = 0 WHERE telegram_user_id = ?", (telegram_user_id,))
+            conn.execute(
+                "UPDATE tracked_players SET is_default = 1 WHERE telegram_user_id = ? AND player_id = ?",
+                (telegram_user_id, player_id),
+            )
+            return True
+
+    def clear_default_player(self, telegram_user_id: int) -> bool:
+        with self.db.connection() as conn:
+            cur = conn.execute("UPDATE tracked_players SET is_default = 0 WHERE telegram_user_id = ? AND is_default = 1", (telegram_user_id,))
+            return cur.rowcount > 0
+
     def set_auto_reports(self, telegram_user_id: int, player_id: str, enabled: bool) -> bool:
         with self.db.connection() as conn:
             cur = conn.execute(

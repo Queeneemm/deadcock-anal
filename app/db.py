@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS tracked_players (
     steam_profile_url TEXT,
     is_enabled INTEGER NOT NULL DEFAULT 1,
     auto_reports_enabled INTEGER NOT NULL DEFAULT 1,
+    is_default INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_match_id TEXT,
     last_sent_match_id TEXT,
@@ -81,3 +82,5 @@ class Database:
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(tracked_players)").fetchall()}
             if "steam_profile_url" not in columns:
                 conn.execute("ALTER TABLE tracked_players ADD COLUMN steam_profile_url TEXT")
+            if "is_default" not in columns:
+                conn.execute("ALTER TABLE tracked_players ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0")

@@ -12,6 +12,7 @@ class TrackedPlayer:
     steam_profile_url: str | None
     is_enabled: bool
     auto_reports_enabled: bool
+    is_default: bool
     created_at: str
     last_seen_match_id: str | None
     last_sent_match_id: str | None
