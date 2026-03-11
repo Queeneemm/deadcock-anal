@@ -26,7 +26,7 @@ async def cmd_help(message: Message) -> None:
         "• 📄 Последний матч — выберите игрока кнопкой\n"
         "• 🧾 Профиль — выберите игрока кнопкой\n\n"
         "<b>Команды тоже работают:</b>\n"
-        "/addplayer &lt;player_id|ник&gt;\n"
+        "/addplayer &lt;player_id|ник|ссылка_steam_profile&gt;\n"
         "/players\n"
         "/removeplayer &lt;player_id&gt;\n"
         "/track &lt;player_id&gt; &lt;on|off&gt;\n"
