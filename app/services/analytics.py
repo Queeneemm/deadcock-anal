@@ -24,6 +24,13 @@ class AnalyticsService:
             best_hero_week=best_hero_week,
         )
 
+    @staticmethod
+    def _damage_reliable(matches: list[MatchSummary]) -> bool:
+        if not matches:
+            return False
+        non_zero = sum(1 for m in matches if m.damage > 0)
+        return (non_zero / len(matches)) >= 0.4
+
     def _build_bad_points(self, current: MatchSummary, hero_history: list[MatchSummary]) -> list[str]:
         points: list[str] = []
         sample = [m for m in hero_history if m.match_id != current.match_id][:10]
@@ -31,19 +38,21 @@ class AnalyticsService:
             return ["Недостаточно истории на этом герое для точного разбора."]
 
         avg_deaths = mean(m.deaths for m in sample)
-        avg_damage = mean(m.damage for m in sample)
         avg_souls = mean(m.souls for m in sample)
         avg_kda = mean((m.kills + m.assists) / max(m.deaths, 1) for m in sample)
         cur_kda = (current.kills + current.assists) / max(current.deaths, 1)
 
         if current.deaths > avg_deaths * 1.25:
             points.append(f"Смертей больше нормы на герое: {current.deaths} против среднего {avg_deaths:.1f}.")
-        if current.damage < avg_damage * 0.8:
-            points.append(f"Урон ниже вашего среднего на этом герое ({current.damage} vs {avg_damage:.0f}).")
         if current.souls < avg_souls * 0.8:
             points.append(f"Темп по souls просел: {current.souls} против {avg_souls:.0f} в среднем.")
         if cur_kda < avg_kda * 0.8:
             points.append(f"KDA ниже типичного уровня: {cur_kda:.2f} vs {avg_kda:.2f}.")
+
+        if self._damage_reliable(sample) and current.damage > 0:
+            avg_damage = mean(m.damage for m in sample)
+            if current.damage < avg_damage * 0.8:
+                points.append(f"Урон ниже вашего среднего на этом герое ({current.damage} vs {avg_damage:.0f}).")
 
         return points[:3] or ["Критичных просадок не найдено, матч скорее нестабильный по темпу."]
 
@@ -52,7 +61,8 @@ class AnalyticsService:
         if not prev:
             return ["Нет прошлого матча для сравнения."]
         points: list[str] = []
-        if current.damage > prev.damage:
+
+        if self._damage_reliable([current, prev]) and current.damage > prev.damage:
             points.append(f"Урон вырос на {current.damage - prev.damage}.")
         if current.souls > prev.souls:
             points.append(f"Экономика лучше прошлого матча: +{current.souls - prev.souls} souls.")
@@ -62,6 +72,9 @@ class AnalyticsService:
         prev_kda = (prev.kills + prev.assists) / max(prev.deaths, 1)
         if cur_kda > prev_kda:
             points.append(f"KDA вырос с {prev_kda:.2f} до {cur_kda:.2f}.")
+        if current.is_win and not prev.is_win:
+            points.append("Удалось конвертировать матч в победу относительно прошлого результата.")
+
         return points[:3] or ["Явных улучшений относительно прошлого матча пока нет, это нормально."]
 
     def _best_hero_week(self, week_matches: list[MatchSummary]) -> dict:
@@ -82,26 +95,28 @@ class AnalyticsService:
             wins = sum(1 for m in matches if m.is_win)
             winrate = wins / len(matches)
             kda = mean((m.kills + m.assists) / max(m.deaths, 1) for m in matches)
-            avg_damage = mean(m.damage for m in matches)
             avg_souls = mean(m.souls for m in matches)
-            candidates.append((hero, len(matches), winrate, kda, avg_damage, avg_souls))
+            candidates.append((hero, len(matches), winrate, kda, avg_souls))
 
         if not candidates:
             return {"hero_name": "Недостаточно матчей", "matches": len(filtered), "winrate": 0.0}
 
-        hero, count, winrate, *_ = sorted(candidates, key=lambda x: (x[2], x[3], x[4] + x[5]), reverse=True)[0]
+        hero, count, winrate, *_ = sorted(candidates, key=lambda x: (x[2], x[3], x[4]), reverse=True)[0]
         return {"hero_name": hero, "matches": count, "winrate": round(winrate * 100, 1)}
 
     def _build_anti_tilt(self, current: MatchSummary, hero_history: list[MatchSummary]) -> str:
         kda = (current.kills + current.assists) / max(current.deaths, 1)
-        if current.team_damage_rank and current.team_damage_rank <= 2:
-            return "Плюс: вы вошли в топ-2 команды по урону."
         if current.team_souls_rank and current.team_souls_rank == 1:
             return "Плюс: лучший показатель souls в команде — отличный темп фарма."
-        if hero_history:
-            avg_damage = mean(m.damage for m in hero_history)
-            if current.damage > avg_damage:
-                return "Плюс: урон выше вашего среднего на этом герое."
         if kda >= 2:
             return "Плюс: достойный KDA, механика была на уровне даже в тяжёлой игре."
-        return "Матч получился тяжёлым, но это рабочий материал для следующего шага вперёд."
+        if hero_history:
+            avg_souls = mean(m.souls for m in hero_history)
+            if current.souls > avg_souls:
+                return "Плюс: по экономике вы сыграли выше своего среднего на этом герое."
+            avg_deaths = mean(m.deaths for m in hero_history)
+            if current.deaths < avg_deaths:
+                return "Плюс: смертей меньше вашего среднего, это хороший шаг к стабильности."
+        if current.is_win:
+            return "Победа — это уже сильный анти-тильт сигнал, зафиксируйте удачные решения из матча."
+        return "Матч получился тяжёлым, но фокус на KDA/экономике и снижении смертей даст прогресс."
