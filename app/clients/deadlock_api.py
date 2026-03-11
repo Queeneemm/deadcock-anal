@@ -43,6 +43,7 @@ class DeadlockApiRoutes:
     analytics_hero_synergy: str = "analytics/hero-synergy-stats"
     analytics_hero_counter: str = "analytics/hero-counter-stats"
     analytics_hero_stats: str = "analytics/hero-stats"
+    patches: str = "patches"
     info: str = "info"
 
 
@@ -234,6 +235,10 @@ class DeadlockApiClient:
     async def get_info(self) -> dict[str, Any]:
         data = await self._request("GET", self.routes.info)
         return data if isinstance(data, dict) else {"raw": data}
+
+    async def get_patches(self) -> list[dict[str, Any]]:
+        data = await self._request("GET", self.routes.patches)
+        return self._extract_list_payload(data)
 
     async def get_player_profile(self, player_id: str) -> dict[str, Any]:
         account_id = self.normalize_account_id(player_id)
