@@ -7,11 +7,17 @@ from aiogram.types import CallbackQuery, Message
 from app.clients.deadlock_api import DeadlockApiClient, DeadlockApiError
 from app.keyboards.inline import (
     MAIN_MENU_ADD_PLAYER,
+    MAIN_MENU_ANALYTICS,
     MAIN_MENU_HELP,
     MAIN_MENU_LAST_MATCH,
     MAIN_MENU_PLAYERS,
     MAIN_MENU_PROFILE,
+    MAIN_MENU_SETTINGS,
+    SETTINGS_DISABLE_AUTO,
+    SETTINGS_ENABLE_AUTO,
+    analytics_actions_keyboard,
     players_management_keyboard,
+    settings_keyboard,
 )
 from app.repositories.players import TrackedPlayersRepository
 from app.repositories.users import UsersRepository
@@ -176,21 +182,64 @@ async def btn_players(message: Message) -> None:
 
 @router.message(F.text == MAIN_MENU_LAST_MATCH)
 async def btn_last_match(message: Message) -> None:
-    await message.answer("Используйте <code>/lastmatch account_id</code> или кнопки в /players.", parse_mode="HTML")
+    await message.answer(
+        "Нажмите /players и выберите игрока — там есть кнопка <b>Последний матч</b>.",
+        parse_mode="HTML",
+    )
 
 
 @router.message(F.text == MAIN_MENU_PROFILE)
 async def btn_profile(message: Message) -> None:
-    await message.answer("Используйте <code>/profile account_id</code> или кнопки в /players.", parse_mode="HTML")
+    await message.answer(
+        "Нажмите /players и выберите игрока — там есть кнопка <b>Профиль</b>.",
+        parse_mode="HTML",
+    )
+
+
+@router.message(F.text == MAIN_MENU_ANALYTICS)
+async def btn_analytics(message: Message) -> None:
+    await message.answer("Выберите раздел аналитики:", reply_markup=analytics_actions_keyboard())
+
+
+@router.message(F.text == MAIN_MENU_SETTINGS)
+async def btn_settings(message: Message) -> None:
+    await message.answer(
+        "<b>Настройки</b>\nВыберите действие для автоотчётов:",
+        parse_mode="HTML",
+    )
+    await message.answer("Выберите опцию:", reply_markup=settings_keyboard())
+
+
+@router.message(F.text == SETTINGS_ENABLE_AUTO)
+async def btn_settings_enable_auto(message: Message) -> None:
+    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
+    players = players_repo.list_players(message.from_user.id)
+    if not players:
+        await message.answer("Сначала добавьте игрока через /addplayer.")
+        return
+    updated = sum(1 for p in players if players_repo.set_auto_reports(message.from_user.id, p.player_id, True))
+    await message.answer(f"Включил автоотчёты для {updated} игроков.")
+
+
+@router.message(F.text == SETTINGS_DISABLE_AUTO)
+async def btn_settings_disable_auto(message: Message) -> None:
+    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
+    players = players_repo.list_players(message.from_user.id)
+    if not players:
+        await message.answer("Сначала добавьте игрока через /addplayer.")
+        return
+    updated = sum(1 for p in players if players_repo.set_auto_reports(message.from_user.id, p.player_id, False))
+    await message.answer(f"Выключил автоотчёты для {updated} игроков.")
 
 
 @router.message(F.text == MAIN_MENU_HELP)
 async def btn_help(message: Message) -> None:
     await message.answer(
         "Подсказка:\n"
-        "1) Добавьте игрока через /addplayer (ID/Steam64/URL/ник)\n"
-        "2) Откройте /players\n"
-        "3) Используйте кнопки профиля, матча и управления автоотслеживанием.",
+        "1) Добавьте игрока через /addplayer (ID/Steam64/URL/ник).\n"
+        "2) Откройте 👥 Мои игроки и управляйте профилем кнопками.\n"
+        "3) В разделе 📊 Аналитика доступны герои, тиммейты, соперники, пати и мета.\n"
+        "4) В ⚙️ Настройки можно массово включить/выключить автоотчёты.",
     )
 
 

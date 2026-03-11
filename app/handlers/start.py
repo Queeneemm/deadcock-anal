@@ -2,7 +2,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.keyboards.inline import commands_keyboard
+from app.keyboards.inline import main_menu_keyboard
 
 router = Router()
 
@@ -11,9 +11,10 @@ router = Router()
 async def cmd_start(message: Message) -> None:
     await message.answer(
         "<b>Привет!</b> Это персональный Deadlock tracker-бот.\n"
-        "Поддерживаются account_id, Steam64, steamcommunity URL и ник Steam.",
+        "Поддерживаются account_id, Steam64, steamcommunity URL и ник Steam.\n"
+        "Используйте кнопки меню ниже — так быстрее и удобнее.",
         parse_mode="HTML",
-        reply_markup=commands_keyboard(),
+        reply_markup=main_menu_keyboard(),
     )
 
 
@@ -36,7 +37,8 @@ async def cmd_help(message: Message) -> None:
         "/synergy &lt;hero_id&gt;\n"
         "/counter &lt;hero_id&gt;\n"
         "/leaderboard &lt;region&gt;\n"
-        "/patches",
+        "/patches\n\n"
+        "Также можно пользоваться кнопками: меню, аналитика и настройки доступны на главной клавиатуре.",
         parse_mode="HTML",
-        reply_markup=commands_keyboard(),
+        reply_markup=main_menu_keyboard(),
     )
