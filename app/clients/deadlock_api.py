@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from xml.etree import ElementTree
 from typing import Any
 
 import httpx
@@ -38,6 +40,32 @@ class DeadlockApiClient:
 
     async def close(self) -> None:
         await self.client.aclose()
+
+    async def resolve_steam_profile_to_player_id(self, profile_url: str) -> str | None:
+        """Преобразует ссылку steamcommunity в SteamID64/account_id для Deadlock API."""
+        normalized = profile_url.strip()
+        direct_match = re.match(r"^https?://steamcommunity\.com/profiles/(\d+)/?", normalized, flags=re.IGNORECASE)
+        if direct_match:
+            return direct_match.group(1)
+
+        vanity_match = re.match(
+            r"^https?://steamcommunity\.com/id/([A-Za-z0-9_\-]+)/?",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if not vanity_match:
+            return None
+
+        vanity_name = vanity_match.group(1)
+        try:
+            response = await self.client.get(f"https://steamcommunity.com/id/{vanity_name}/?xml=1")
+            response.raise_for_status()
+            xml_root = ElementTree.fromstring(response.text)
+            steam_id64 = xml_root.findtext("steamID64")
+            return steam_id64.strip() if steam_id64 else None
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError, ElementTree.ParseError):
+            logger.exception("Не удалось разрешить Steam профиль: %s", profile_url)
+            return None
 
     async def _request(self, method: str, path: str, params: dict[str, Any] | None = None) -> Any:
         retries = 4

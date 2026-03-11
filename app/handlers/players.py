@@ -1,4 +1,5 @@
 import logging
+import re
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -35,13 +36,21 @@ async def cmd_addplayer(message: Message) -> None:
     users_repo.ensure_user(message.from_user.id)
     args = (message.text or "").split(maxsplit=1)
     if len(args) < 2:
-        await message.answer("Использование: <code>/addplayer player_id</code>", parse_mode="HTML")
+        await message.answer("Использование: <code>/addplayer player_id|ник|steam_profile_url</code>", parse_mode="HTML")
         return
     query = args[1].strip()
 
     player_id = query
     display_name = query
-    if not query.isdigit():
+    if re.match(r"^https?://steamcommunity\.com/(profiles|id)/", query, flags=re.IGNORECASE):
+        resolved = await api.resolve_steam_profile_to_player_id(query)
+        if not resolved:
+            await message.answer("Не удалось прочитать Steam-профиль по ссылке. Проверьте ссылку и приватность профиля.")
+            return
+        player_id = resolved
+        display_name = resolved
+
+    if not player_id.isdigit():
         variants = await api.resolve_player(query)
         if len(variants) == 1:
             player_id = str(variants[0].get("player_id"))
@@ -112,7 +121,11 @@ async def cmd_track(message: Message) -> None:
 
 @router.message(F.text == MAIN_MENU_ADD_PLAYER)
 async def btn_add_player(message: Message) -> None:
-    await message.answer("Отправьте команду: <code>/addplayer player_id</code> или <code>/addplayer ник</code>", parse_mode="HTML")
+    await message.answer(
+        "Отправьте: <code>/addplayer player_id</code>, <code>/addplayer ник</code> "
+        "или <code>/addplayer https://steamcommunity.com/...</code>",
+        parse_mode="HTML",
+    )
 
 
 @router.message(F.text == MAIN_MENU_PLAYERS)
