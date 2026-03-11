@@ -7,6 +7,20 @@ MAIN_MENU_PROFILE = "🧾 Профиль"
 MAIN_MENU_HELP = "❓ Помощь"
 
 
+def commands_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="/players"), KeyboardButton(text="/addplayer")],
+            [KeyboardButton(text="/lastmatch"), KeyboardButton(text="/profile")],
+            [KeyboardButton(text="/heroes"), KeyboardButton(text="/besthero")],
+            [KeyboardButton(text="/teammates"), KeyboardButton(text="/enemies")],
+            [KeyboardButton(text="/party"), KeyboardButton(text="/meta")],
+            [KeyboardButton(text="/leaderboard"), KeyboardButton(text="/patches")],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -42,4 +56,9 @@ def players_management_keyboard(player_id: str, auto_reports_enabled: bool, stea
     if steam_profile_url:
         rows.append([InlineKeyboardButton(text="🔗 Открыть профиль", url=steam_profile_url)])
     rows.append([InlineKeyboardButton(text="🗑 Удалить", callback_data=f"rm:{player_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def player_select_keyboard(action: str, players: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=f"{name} ({account_id})", callback_data=f"sel:{action}:{account_id}")] for account_id, name in players[:10]]
     return InlineKeyboardMarkup(inline_keyboard=rows)

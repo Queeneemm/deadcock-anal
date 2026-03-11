@@ -2,7 +2,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.keyboards.inline import main_menu_keyboard
+from app.keyboards.inline import commands_keyboard
 
 router = Router()
 
@@ -13,7 +13,7 @@ async def cmd_start(message: Message) -> None:
         "<b>Привет!</b> Это персональный Deadlock tracker-бот.\n"
         "Поддерживаются account_id, Steam64, steamcommunity URL и ник Steam.",
         parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=commands_keyboard(),
     )
 
 
@@ -24,19 +24,19 @@ async def cmd_help(message: Message) -> None:
         "/addplayer &lt;account_id|Steam64|steam_url|nickname&gt;\n"
         "/pickplayer &lt;N&gt;\n"
         "/players\n"
-        "/lastmatch &lt;account_id&gt;\n"
-        "/profile &lt;account_id&gt;\n"
-        "/heroes &lt;account_id&gt;\n"
-        "/besthero &lt;account_id&gt;\n"
+        "/lastmatch [account_id]\n"
+        "/profile [account_id]\n"
+        "/heroes [account_id]\n"
+        "/besthero [account_id]\n"
         "/hero &lt;account_id&gt; &lt;hero_id&gt;\n"
-        "/teammates &lt;account_id&gt;\n"
-        "/enemies &lt;account_id&gt;\n"
-        "/party &lt;account_id&gt;\n"
+        "/teammates [account_id]\n"
+        "/enemies [account_id]\n"
+        "/party [account_id]\n"
         "/meta\n"
         "/synergy &lt;hero_id&gt;\n"
         "/counter &lt;hero_id&gt;\n"
         "/leaderboard &lt;region&gt;\n"
         "/patches",
         parse_mode="HTML",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=commands_keyboard(),
     )

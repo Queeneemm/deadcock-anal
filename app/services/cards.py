@@ -36,18 +36,18 @@ class CardRenderer:
         card.alpha_composite(rounded_rectangle_overlay((1020, 260), 24, (25, 27, 36, 210)), (30, 30))
         draw.rectangle((30, 30, 44, 290), fill=accent)
 
-        result = "Victory" if summary.is_win else "Defeat"
+        result = "Победа" if summary.is_win else "Поражение"
         draw.text((70, 55), safe_text(f"{player_name} — {summary.hero_name}", font_title), fill=(255, 255, 255), font=font_title)
-        draw.text((70, 115), safe_text(f"Result: {result}", font_text), fill=accent, font=font_text)
-        draw.text((70, 160), safe_text(f"Match ID: {summary.match_id}", font_small), fill=(220, 220, 220), font=font_small)
-        draw.text((70, 195), safe_text(f"Date: {summary.match_datetime.strftime('%d.%m.%Y %H:%M')}", font_small), fill=(180, 180, 185), font=font_small)
-        draw.text((70, 230), safe_text(f"Duration: {summary.duration_seconds // 60} min", font_small), fill=(180, 180, 185), font=font_small)
+        draw.text((70, 115), safe_text(f"Результат: {result}", font_text), fill=accent, font=font_text)
+        draw.text((70, 160), safe_text(f"Матч ID: {summary.match_id}", font_small), fill=(220, 220, 220), font=font_small)
+        draw.text((70, 195), safe_text(f"Дата: {summary.match_datetime.strftime('%d.%m.%Y %H:%M')}", font_small), fill=(180, 180, 185), font=font_small)
+        draw.text((70, 230), safe_text(f"Длительность: {summary.duration_seconds // 60} мин", font_small), fill=(180, 180, 185), font=font_small)
 
         card.alpha_composite(rounded_rectangle_overlay((1020, 170), 20, (20, 22, 30, 220)), (30, 320))
         draw.text(
             (70, 370),
             safe_text(
-                f"K/D/A: {summary.kills}/{summary.deaths}/{summary.assists}    Souls: {summary.souls}    Damage: {summary.damage}",
+                f"K/D/A: {summary.kills}/{summary.deaths}/{summary.assists}    Души: {summary.souls}    Урон: {summary.damage}",
                 font_text,
             ),
             fill=(255, 255, 255),
@@ -56,13 +56,13 @@ class CardRenderer:
 
         y = 520
         sections = [
-            ("What went wrong", analytics.bad_points),
-            ("What improved since last match", analytics.improved_points),
-            ("Anti-tilt", [analytics.anti_tilt]),
+            ("Что было плохо", analytics.bad_points),
+            ("Что улучшилось с прошлого матча", analytics.improved_points),
+            ("Анти-тильт", [analytics.anti_tilt]),
             (
-                "Best hero of the week",
+                "Лучший герой недели",
                 [
-                    f"{analytics.best_hero_week['hero_name']} — matches: {analytics.best_hero_week['matches']}, winrate: {analytics.best_hero_week['winrate']}%"
+                    f"{analytics.best_hero_week['hero_name']} — матчей: {analytics.best_hero_week['matches']}, винрейт: {analytics.best_hero_week['winrate']}%"
                 ],
             ),
         ]
@@ -80,7 +80,7 @@ class CardRenderer:
             card.alpha_composite(rounded_rectangle_overlay((80, 80), 16, (30, 32, 40, 220)), (60 + index * 90, icons_y - 4))
             card.alpha_composite(item_img, (64 + index * 90, icons_y))
 
-        draw.text((810, 1308), safe_text("Deadlock Scout Bot", font_small), fill=(130, 130, 140), font=font_small)
+        draw.text((780, 1308), safe_text("Deadlock Scout Bot", font_small), fill=(130, 130, 140), font=font_small)
 
         output = self.output_dir / f"match_{summary.match_id}_{player_name}.png"
         card.convert("RGB").save(output, "PNG")
