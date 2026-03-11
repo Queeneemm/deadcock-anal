@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -74,11 +75,20 @@ class DeadlockApiClient:
         timeout_seconds: int,
         rate_limiter: RateLimiter,
         routes: DeadlockApiRoutes | None = None,
+        max_retries: int = 4,
+        retry_base_delay: float = 1.0,
+        match_history_ttl_seconds: int = 20,
+        enable_cache: bool = True,
     ):
         self.base_url = base_url.rstrip("/") + "/"
         self.timeout = timeout_seconds
         self.rate_limiter = rate_limiter
         self.routes = routes or DeadlockApiRoutes()
+        self.max_retries = max(1, max_retries)
+        self.retry_base_delay = max(0.1, retry_base_delay)
+        self.match_history_ttl_seconds = max(0, match_history_ttl_seconds)
+        self.enable_cache = enable_cache
+        self._match_history_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self.client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
 
     async def close(self) -> None:
@@ -145,8 +155,7 @@ class DeadlockApiClient:
         return []
 
     async def _request(self, method: str, path: str, params: dict[str, Any] | None = None) -> Any:
-        retries = 4
-        for attempt in range(retries):
+        for attempt in range(self.max_retries):
             await self.rate_limiter.wait()
             try:
                 response = await self.client.request(method, path, params=params)
@@ -154,25 +163,55 @@ class DeadlockApiClient:
                 if status == 404:
                     raise DeadlockApiNotFoundError(f"404 для маршрута {method} {path}")
                 if status == 429 or status >= 500:
-                    raise DeadlockApiTemporaryError(f"Временная ошибка {status} для {method} {path}")
+                    retry_after = self._parse_retry_after_seconds(response)
+                    if attempt == self.max_retries - 1:
+                        raise DeadlockApiTemporaryError(f"Временная ошибка {status} для {method} {path}")
+                    delay = retry_after if retry_after is not None else self._build_backoff_delay(attempt)
+                    logger.warning(
+                        "Временная ошибка Deadlock API (%s %s, HTTP %s). Повтор %s/%s через %.2f сек",
+                        method,
+                        path,
+                        status,
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 if status >= 400:
                     raise DeadlockApiError(f"Ошибка API {status} для {method} {path}: {response.text[:200]}")
                 return response.json()
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
-                if attempt == retries - 1:
+                if attempt == self.max_retries - 1:
                     raise DeadlockApiTemporaryError(f"Сетевая ошибка для {method} {path}: {exc}") from exc
-                backoff = 2**attempt
-                logger.warning("Сетевая ошибка Deadlock API, повтор через %s сек", backoff)
-                await asyncio.sleep(backoff)
-            except DeadlockApiTemporaryError:
-                if attempt == retries - 1:
-                    raise
-                backoff = 2**attempt
-                logger.warning("Временная ошибка Deadlock API, повтор через %s сек", backoff)
-                await asyncio.sleep(backoff)
+                delay = self._build_backoff_delay(attempt)
+                logger.warning(
+                    "Сетевая временная ошибка Deadlock API (%s %s). Повтор %s/%s через %.2f сек",
+                    method,
+                    path,
+                    attempt + 1,
+                    self.max_retries,
+                    delay,
+                )
+                await asyncio.sleep(delay)
             except ValueError as exc:
                 raise DeadlockApiError(f"Некорректный JSON от API для {method} {path}") from exc
-        raise RuntimeError("Недостижимая ветка")
+
+        raise DeadlockApiTemporaryError(f"Временная ошибка для {method} {path} после {self.max_retries} попыток")
+
+    @staticmethod
+    def _parse_retry_after_seconds(response: httpx.Response) -> float | None:
+        raw = response.headers.get("Retry-After")
+        if raw is None:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    def _build_backoff_delay(self, attempt: int) -> float:
+        return self.retry_base_delay * (2**attempt) + random.uniform(0, 0.3)
 
     async def search_steam_profiles(self, query: str) -> list[dict[str, Any]]:
         data = await self._request("GET", self.routes.steam_search, params={"search_query": query})
@@ -185,8 +224,18 @@ class DeadlockApiClient:
 
     async def get_match_history(self, account_id: str | int) -> list[dict[str, Any]]:
         normalized = self.normalize_account_id(account_id)
+        if self.enable_cache and self.match_history_ttl_seconds > 0:
+            cached = self._match_history_cache.get(normalized)
+            now = asyncio.get_running_loop().time()
+            if cached and cached[0] > now:
+                return cached[1]
+
         data = await self._request("GET", self.routes.match_history.format(account_id=normalized))
-        return self._extract_list_payload(data)
+        payload = self._extract_list_payload(data)
+        if self.enable_cache and self.match_history_ttl_seconds > 0:
+            expires_at = asyncio.get_running_loop().time() + self.match_history_ttl_seconds
+            self._match_history_cache[normalized] = (expires_at, payload)
+        return payload
 
     async def get_player_recent_matches(self, account_id: str | int, limit: int = 20) -> list[dict[str, Any]]:
         return (await self.get_match_history(account_id))[:limit]
