@@ -71,7 +71,13 @@ class DeadlockApiClient:
         return await self._request("GET", f"players/{player_id}")
 
     async def resolve_player(self, query: str) -> list[dict[str, Any]]:
-        return await self._request("GET", "players/search", params={"q": query})
+        try:
+            return await self._request("GET", "players/search", params={"q": query})
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.info("Игрок не найден в Deadlock API по запросу: %s", query)
+                return []
+            raise
 
     @staticmethod
     def parse_match_for_player(match_payload: dict[str, Any], player_id: str) -> dict[str, Any]:
