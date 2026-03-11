@@ -10,8 +10,8 @@ router = Router()
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     await message.answer(
-        "<b>Привет!</b> Я бот для отслеживания матчей Deadlock.\n"
-        "Работаю по account_id (или ссылке на Steam-профиль).",
+        "<b>Привет!</b> Это персональный Deadlock tracker-бот.\n"
+        "Поддерживаются account_id, Steam64, steamcommunity URL и ник Steam.",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )
@@ -20,18 +20,22 @@ async def cmd_start(message: Message) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     await message.answer(
-        "<b>Доступные действия:</b>\n"
-        "• ➕ Добавить игрока — отправлю инструкцию, как добавить\n"
-        "• 👥 Мои игроки — список с кнопками действий\n"
-        "• 📄 Последний матч — выберите игрока кнопкой\n"
-        "• 🧾 Профиль — выберите игрока кнопкой\n\n"
-        "<b>Команды тоже работают:</b>\n"
-        "/addplayer &lt;account_id|ссылка_steam_profile&gt;\n"
+        "<b>Основные команды:</b>\n"
+        "/addplayer &lt;account_id|Steam64|steam_url|nickname&gt;\n"
+        "/pickplayer &lt;N&gt;\n"
         "/players\n"
-        "/removeplayer &lt;account_id&gt;\n"
-        "/track &lt;account_id&gt; &lt;on|off&gt;\n"
         "/lastmatch &lt;account_id&gt;\n"
-        "/profile &lt;account_id&gt;",
+        "/profile &lt;account_id&gt;\n"
+        "/heroes &lt;account_id&gt;\n"
+        "/besthero &lt;account_id&gt;\n"
+        "/hero &lt;account_id&gt; &lt;hero_id&gt;\n"
+        "/teammates &lt;account_id&gt;\n"
+        "/enemies &lt;account_id&gt;\n"
+        "/party &lt;account_id&gt;\n"
+        "/meta\n"
+        "/synergy &lt;hero_id&gt;\n"
+        "/counter &lt;hero_id&gt;\n"
+        "/leaderboard &lt;region&gt;",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )

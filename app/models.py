@@ -9,6 +9,7 @@ class TrackedPlayer:
     telegram_user_id: int
     player_id: str
     display_name: str
+    steam_profile_url: str | None
     is_enabled: bool
     auto_reports_enabled: bool
     created_at: str

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS tracked_players (
     telegram_user_id INTEGER NOT NULL,
     player_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
+    steam_profile_url TEXT,
     is_enabled INTEGER NOT NULL DEFAULT 1,
     auto_reports_enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -77,3 +78,6 @@ class Database:
     def init(self) -> None:
         with self.connection() as conn:
             conn.executescript(INIT_SQL)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(tracked_players)").fetchall()}
+            if "steam_profile_url" not in columns:
+                conn.execute("ALTER TABLE tracked_players ADD COLUMN steam_profile_url TEXT")

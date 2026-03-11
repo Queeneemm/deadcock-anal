@@ -29,16 +29,17 @@ def report_actions_keyboard(player_id: str, match_id: str) -> InlineKeyboardMark
     )
 
 
-def players_management_keyboard(player_id: str, auto_reports_enabled: bool) -> InlineKeyboardMarkup:
-    toggle_text = "Выключить автоотчёты" if auto_reports_enabled else "Включить автоотчёты"
+def players_management_keyboard(player_id: str, auto_reports_enabled: bool, steam_profile_url: str | None = None) -> InlineKeyboardMarkup:
+    toggle_text = "Отключить автоотслеживание" if auto_reports_enabled else "Включить автоотслеживание"
     toggle_to = "off" if auto_reports_enabled else "on"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📄 Матч", callback_data=f"lm:{player_id}"),
-                InlineKeyboardButton(text="🧾 Профиль", callback_data=f"rp:{player_id}"),
-            ],
-            [InlineKeyboardButton(text=toggle_text, callback_data=f"tg:{player_id}:{toggle_to}")],
-            [InlineKeyboardButton(text="🗑 Удалить игрока", callback_data=f"rm:{player_id}")],
-        ]
-    )
+    rows = [
+        [
+            InlineKeyboardButton(text="📄 Последний матч", callback_data=f"lm:{player_id}"),
+            InlineKeyboardButton(text="🧾 Профиль", callback_data=f"rp:{player_id}"),
+        ],
+        [InlineKeyboardButton(text=toggle_text, callback_data=f"tg:{player_id}:{toggle_to}")],
+    ]
+    if steam_profile_url:
+        rows.append([InlineKeyboardButton(text="🔗 Открыть профиль", url=steam_profile_url)])
+    rows.append([InlineKeyboardButton(text="🗑 Удалить", callback_data=f"rm:{player_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

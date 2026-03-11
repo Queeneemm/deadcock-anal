@@ -1,150 +1,111 @@
 # Deadlock Scout Bot
 
-Telegram-бот на Python 3.11+ для отслеживания матчей Deadlock, аналитики и отправки PNG-карточек.
+Telegram-бот на Python (aiogram + SQLite) для персонального трекинга игроков Deadlock: история матчей, профиль, аналитика, карточки матча, мета и статистика по героям.
 
-## Что актуально по интеграции API
+## Какие маршруты Deadlock API реально используются
 
-Проект использует только подтверждённый маршрут истории матчей:
+Только подтверждённые маршруты:
+
+- `GET /v1/players/steam?account_ids=`
+- `GET /v1/players/steam-search?search_query=`
 - `GET /v1/players/{account_id}/match-history`
+- `GET /v1/players/hero-stats?account_ids=`
+- `GET /v1/players/{account_id}/enemy-stats`
+- `GET /v1/players/{account_id}/mate-stats`
+- `GET /v1/players/{account_id}/party-stats`
+- `GET /v1/players/mmr?account_ids=`
+- `GET /v1/leaderboard/{region}`
+- `GET /v1/analytics/hero-synergy-stats`
+- `GET /v1/analytics/hero-counter-stats`
+- `GET /v1/analytics/hero-stats`
+- `GET /v1/info`
 
-Подтверждённые сервисные маршруты для ручной проверки:
-- `/openapi.json`
-- `/docs`
-- `/v1/info`
+Служебно доступны: `/docs`, `/openapi.json`.
 
-Неподтверждённые/старые маршруты больше не используются:
-- `/players/search`
-- `/players/recent-matches`
-- `/players/{id}`
-- `/match-history/{account_id}`
-- `/steam-profile/{account_id}`
+❌ Старые неверные маршруты удалены из логики (`/players/search`, `/players/recent-matches`, `/players/{id}`, `/match-history/{account_id}`).
 
-Профиль игрока в боте теперь строится по истории матчей (fallback-режим), а расширенные детали матча также работают в fallback-режиме без выдуманных данных.
+## Как работает поиск игрока
 
-## Возможности
-- Отслеживание нескольких игроков на одного Telegram-пользователя.
-- Автоматический polling новых матчей.
-- Отправка отчётов без дублей.
-- Аналитика и генерация карточек матча.
-- Inline-кнопки для быстрого управления.
+`/addplayer` принимает:
 
-## Стек
-- Python 3.11+
-- aiogram 3.x
-- httpx
-- sqlite3
-- Pillow
-- pydantic / pydantic-settings
+- `account_id`
+- `Steam64`
+- `https://steamcommunity.com/profiles/...`
+- `https://steamcommunity.com/id/...`
+- обычный Steam nickname
 
-## Установка и запуск
+Логика:
 
-### 1) Виртуальное окружение
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-```
+1. Числовой ввод нормализуется до `account_id` (Steam64 -> account_id).
+2. Steam URL парсится, vanity URL резолвится через Steam XML профиль.
+3. Ник ищется через `/v1/players/steam-search`.
+4. Если найдено несколько профилей — бот предлагает `/pickplayer N`.
+5. В БД канонически сохраняется `account_id`, а также `display_name` и `steam_profile_url` (если есть).
 
-### 2) Установка зависимостей
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+## Команды
 
-### 3) Настройка переменных окружения
-```bash
-cp .env.example .env
-```
-
-Заполните `.env`:
-- `BOT_TOKEN` — токен Telegram-бота
-- `DEADLOCK_API_BASE_URL` — базовый URL Deadlock API
-- `DEADLOCK_ASSETS_BASE_URL` — базовый URL API ассетов
-- `DATABASE_URL=sqlite:///data/bot.db`
-- `POLL_INTERVAL_SECONDS` — интервал автоопроса
-- `REQUEST_TIMEOUT_SECONDS` — таймаут запросов
-- `ASSET_CACHE_DIR` — локальный кэш ассетов
-- `CARD_OUTPUT_DIR` — папка PNG-карточек
-- `LOG_LEVEL` — уровень логирования
-
-### 4) Запуск
-```bash
-python -m app.bot
-```
-
-## Команды бота
-- `/addplayer <account_id|Steam64|steam_profile_url>`
+- `/addplayer`
+- `/pickplayer`
 - `/players`
-- `/removeplayer <account_id>`
-- `/track <account_id> <on|off>`
-- `/lastmatch <account_id>`
-- `/profile <account_id>`
+- `/lastmatch`
+- `/profile`
+- `/heroes`
+- `/besthero`
+- `/hero <account_id> <hero_id>`
+- `/teammates`
+- `/enemies`
+- `/party`
+- `/meta`
+- `/synergy <hero_id>`
+- `/counter <hero_id>`
+- `/leaderboard <region>`
 
-> Поиск игрока по нику через API отключён: используйте только `account_id`, `Steam64` или ссылку `steamcommunity`.
+## History-only режим
 
-## Поток идентификаторов
-- Основной идентификатор внутри проекта: `account_id`.
-- Если пользователь вводит SteamID64, бот преобразует его в `account_id`.
-- Если пользователь вводит ссылку `steamcommunity.com/profiles/...` или `steamcommunity.com/id/...`, бот извлекает SteamID64 и затем преобразует его в `account_id`.
-- В БД исторически используется имя поля `player_id`, но фактически в нём хранится `account_id`.
+Когда недоступны детальные данные матча, всё строится честно по `match-history`:
 
-## Как вручную проверить API через curl
+- `hero_name`: fallback `Hero #id`
+- `souls = net_worth`
+- `damage = 0`, если поле отсутствует
+- `items = []`
+- `start_time -> ISO UTC`
 
-Пусть:
-- `BASE_URL` — базовый URL (например, `https://deadlock-api.example.com`)
-- `ACCOUNT_ID` — numeric account_id
+Карточки и аналитика продолжают работать без выдуманных полей.
+
+## Где используются Steam endpoints
+
+- `/v1/players/steam-search` — поиск по нику.
+- `/v1/players/steam` — обогащение account_id до `personaname` + `profile_url`.
+
+Это используется в `/addplayer`, `/players`, `/profile`, `/teammates`, `/enemies`, `/leaderboard` для кликабельных имён в Telegram.
+
+## Важно про имена героев
+
+Подтверждённого справочника hero_id -> hero_name сейчас нет.
+Поэтому отображается fallback: `Hero #13`.
+Отдельный helper `app/services/heroes.py` подготовлен с TODO для будущего подключения словаря.
+
+## Быстрая ручная проверка API (curl)
 
 ```bash
+BASE_URL="https://your-deadlock-api"
+ACCOUNT_ID="162968642"
+
 curl -sS "$BASE_URL/v1/info"
-curl -sS "$BASE_URL/openapi.json"
 curl -sS "$BASE_URL/docs"
+curl -sS "$BASE_URL/openapi.json"
+
+curl -sS "$BASE_URL/v1/players/steam?account_ids=$ACCOUNT_ID"
+curl -sS "$BASE_URL/v1/players/steam-search?search_query=nickname"
 curl -sS "$BASE_URL/v1/players/$ACCOUNT_ID/match-history"
-```
+curl -sS "$BASE_URL/v1/players/hero-stats?account_ids=$ACCOUNT_ID"
+curl -sS "$BASE_URL/v1/players/$ACCOUNT_ID/mate-stats"
+curl -sS "$BASE_URL/v1/players/$ACCOUNT_ID/enemy-stats"
+curl -sS "$BASE_URL/v1/players/$ACCOUNT_ID/party-stats"
+curl -sS "$BASE_URL/v1/players/mmr?account_ids=$ACCOUNT_ID"
 
-Примеры поддерживаемого ввода для `/addplayer`:
-- `123456789` (account_id)
-- `7656119...` (Steam64, будет конвертирован)
-- `https://steamcommunity.com/profiles/7656119...`
-- `https://steamcommunity.com/id/vanity_name`
-
-## Обработка ошибок API
-
-В клиенте добавлены типизированные исключения:
-- `DeadlockApiError` — базовая ошибка API.
-- `DeadlockApiNotFoundError` — 404.
-- `DeadlockApiTemporaryError` — 429/5xx и сетевые проблемы (с retry).
-- `DeadlockApiUnsupportedRouteError` — неподтверждённый маршрут.
-
-Поведение:
-- Хендлеры `/addplayer`, `/lastmatch`, `/profile` не падают при API-ошибках.
-- Polling не спамит одинаковыми 404 в логах (повторные предупреждения подавляются).
-- Если деталей матча нет, используется parsing из `match-history`.
-
-## Структура проекта
-```text
-app/
-  bot.py
-  config.py
-  db.py
-  models.py
-  repositories/
-    users.py
-    players.py
-    matches.py
-  clients/
-    deadlock_api.py
-    assets.py
-  services/
-    polling.py
-    analytics.py
-    cards.py
-  handlers/
-    start.py
-    players.py
-    reports.py
-  keyboards/
-    inline.py
-  utils/
-    logging.py
-    image.py
-README.md
+curl -sS "$BASE_URL/v1/analytics/hero-stats"
+curl -sS "$BASE_URL/v1/analytics/hero-synergy-stats"
+curl -sS "$BASE_URL/v1/analytics/hero-counter-stats"
+curl -sS "$BASE_URL/v1/leaderboard/Europe"
 ```

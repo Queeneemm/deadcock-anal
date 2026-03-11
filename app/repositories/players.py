@@ -6,15 +6,15 @@ class TrackedPlayersRepository:
     def __init__(self, db: Database):
         self.db = db
 
-    def add_player(self, telegram_user_id: int, player_id: str, display_name: str) -> bool:
+    def add_player(self, telegram_user_id: int, player_id: str, display_name: str, steam_profile_url: str | None = None) -> bool:
         with self.db.connection() as conn:
             cur = conn.execute(
                 """
                 INSERT OR IGNORE INTO tracked_players
-                (telegram_user_id, player_id, display_name, is_enabled, auto_reports_enabled)
-                VALUES (?, ?, ?, 1, 1)
+                (telegram_user_id, player_id, display_name, steam_profile_url, is_enabled, auto_reports_enabled)
+                VALUES (?, ?, ?, ?, 1, 1)
                 """,
-                (telegram_user_id, player_id, display_name),
+                (telegram_user_id, player_id, display_name, steam_profile_url),
             )
             return cur.rowcount > 0
 

@@ -1,5 +1,4 @@
 import logging
-import re
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -21,70 +20,106 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def _profile_link(account_id: str, personaname: str, profile_url: str | None, api: DeadlockApiClient) -> str:
+    url = profile_url or f"https://steamcommunity.com/profiles/{api.account_id_to_steam64(account_id)}"
+    return f'<a href="{url}">{personaname}</a>'
+
+
 def setup_players_dependencies(users_repo: UsersRepository, players_repo: TrackedPlayersRepository, api: DeadlockApiClient) -> None:
     router.users_repo = users_repo  # type: ignore[attr-defined]
     router.players_repo = players_repo  # type: ignore[attr-defined]
     router.api = api  # type: ignore[attr-defined]
+    router.search_cache = {}  # type: ignore[attr-defined]
+
+
+async def _save_player(message: Message, account_id: str, personaname: str, profile_url: str | None) -> None:
+    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
+    created = players_repo.add_player(message.from_user.id, account_id, personaname, steam_profile_url=profile_url)
+    if created:
+        await message.answer(
+            f"Игрок {_profile_link(account_id, personaname, profile_url, router.api)} (<code>{account_id}</code>) добавлен.",  # type: ignore[attr-defined]
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer("Этот игрок уже есть в вашем списке.")
 
 
 @router.message(Command("addplayer"))
 async def cmd_addplayer(message: Message) -> None:
     users_repo: UsersRepository = router.users_repo  # type: ignore[attr-defined]
-    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
 
     users_repo.ensure_user(message.from_user.id)
     args = (message.text or "").split(maxsplit=1)
     if len(args) < 2:
         await message.answer(
-            "Использование: <code>/addplayer account_id|Steam64|steamcommunity_url</code>",
+            "Использование: <code>/addplayer account_id|Steam64|steamcommunity_url|nickname</code>",
             parse_mode="HTML",
         )
         return
 
     query = args[1].strip()
-    account_id: str | None = None
-
     try:
-        if re.match(r"^https?://steamcommunity\.com/(profiles|id)/", query, flags=re.IGNORECASE):
-            account_id = await api.resolve_steam_profile_to_account_id(query)
-            if not account_id:
-                await message.answer("Не удалось прочитать Steam-профиль. Проверьте ссылку и приватность профиля.")
-                return
-        elif query.isdigit():
-            account_id = api.normalize_account_id(query)
-        else:
-            await message.answer(
-                "Поиск по нику пока не поддерживается. "
-                "Укажите account_id, Steam64 или ссылку на steamcommunity.com/profiles/... (или /id/...)."
-            )
-            return
+        resolved = await api.resolve_player(query)
     except (DeadlockApiError, ValueError):
-        logger.exception("Ошибка при добавлении игрока: %s", query)
-        await message.answer("Не удалось обработать ввод. Укажите корректный account_id, Steam64 или ссылку Steam.")
+        logger.exception("Ошибка resolve_player: %s", query)
+        await message.answer("Не удалось обработать ввод. Проверьте формат и попробуйте снова.")
         return
 
-    if not account_id:
-        await message.answer("Не удалось определить account_id. Используйте account_id, Steam64 или ссылку Steam.")
+    resolved = [item for item in resolved if item.get("account_id")]
+    if not resolved:
+        await message.answer("Ничего не найдено. Проверьте ник/ссылку/ID и попробуйте снова.")
         return
 
-    try:
-        profile = await api.get_player_profile(account_id)
-        display_name = str(profile.get("display_name") or account_id)
-    except DeadlockApiError:
-        logger.warning("Не удалось получить fallback-профиль для account_id=%s", account_id)
-        display_name = account_id
+    if len(resolved) == 1:
+        profile = resolved[0]
+        await _save_player(
+            message,
+            str(profile["account_id"]),
+            str(profile.get("personaname") or f"Игрок {profile['account_id']}"),
+            profile.get("profile_url"),
+        )
+        return
 
-    created = players_repo.add_player(message.from_user.id, account_id, display_name)
-    if created:
-        await message.answer(f"Игрок <b>{display_name}</b> (<code>{account_id}</code>) добавлен в отслеживание.", parse_mode="HTML")
-    else:
-        await message.answer("Этот игрок уже отслеживается.")
+    search_cache: dict[int, list[dict[str, str]]] = router.search_cache  # type: ignore[attr-defined]
+    search_cache[message.from_user.id] = [
+        {
+            "account_id": str(item["account_id"]),
+            "personaname": str(item.get("personaname") or f"Игрок {item['account_id']}"),
+            "profile_url": str(item.get("profile_url") or ""),
+        }
+        for item in resolved[:10]
+    ]
+    lines = ["Найдено несколько профилей. Выберите командой:"]
+    for idx, item in enumerate(search_cache[message.from_user.id], start=1):
+        lines.append(f"{idx}. {item['personaname']} (<code>{item['account_id']}</code>) — /pickplayer {idx}")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("pickplayer"))
+async def cmd_pickplayer(message: Message) -> None:
+    search_cache: dict[int, list[dict[str, str]]] = router.search_cache  # type: ignore[attr-defined]
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("Использование: <code>/pickplayer N</code>", parse_mode="HTML")
+        return
+    options = search_cache.get(message.from_user.id) or []
+    if not options:
+        await message.answer("Нет активного списка поиска. Сначала выполните /addplayer nickname")
+        return
+    idx = int(args[1]) - 1
+    if idx < 0 or idx >= len(options):
+        await message.answer("Неверный номер варианта.")
+        return
+    picked = options[idx]
+    await _save_player(message, picked["account_id"], picked["personaname"], picked.get("profile_url") or None)
 
 
 @router.message(Command("players"))
 async def cmd_players(message: Message) -> None:
     players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
+    api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
+
     players = players_repo.list_players(message.from_user.id)
     if not players:
         await message.answer("Пока нет отслеживаемых игроков. Добавьте через /addplayer.")
@@ -92,11 +127,12 @@ async def cmd_players(message: Message) -> None:
 
     await message.answer("<b>Ваши отслеживаемые игроки:</b>", parse_mode="HTML")
     for p in players:
-        status = "✅ автоотчёты" if p.auto_reports_enabled else "⏸ автоотчёты выключены"
+        status = "✅ автоотслеживание включено" if p.auto_reports_enabled else "⏸ автоотслеживание выключено"
+        name = _profile_link(p.player_id, p.display_name, p.steam_profile_url, api)
         await message.answer(
-            f"• <b>{p.display_name}</b> (<code>{p.player_id}</code>) — {status}",
+            f"• {name}\nID: <code>{p.player_id}</code>\n{status}",
             parse_mode="HTML",
-            reply_markup=players_management_keyboard(p.player_id, p.auto_reports_enabled),
+            reply_markup=players_management_keyboard(p.player_id, p.auto_reports_enabled, p.steam_profile_url),
         )
 
 
@@ -122,18 +158,13 @@ async def cmd_track(message: Message) -> None:
         return
     enabled = args[2] == "on"
     updated = players_repo.set_auto_reports(message.from_user.id, args[1], enabled)
-    if updated:
-        await message.answer("Автоотслеживание обновлено.")
-    else:
-        await message.answer("Игрок не найден.")
+    await message.answer("Автоотслеживание обновлено." if updated else "Игрок не найден.")
 
 
 @router.message(F.text == MAIN_MENU_ADD_PLAYER)
 async def btn_add_player(message: Message) -> None:
     await message.answer(
-        "Отправьте: <code>/addplayer account_id</code> "
-        "или <code>/addplayer Steam64</code> "
-        "или <code>/addplayer https://steamcommunity.com/...</code>",
+        "Отправьте: <code>/addplayer account_id|Steam64|steamcommunity_url|nickname</code>",
         parse_mode="HTML",
     )
 
@@ -145,21 +176,21 @@ async def btn_players(message: Message) -> None:
 
 @router.message(F.text == MAIN_MENU_LAST_MATCH)
 async def btn_last_match(message: Message) -> None:
-    await message.answer("Используйте <code>/lastmatch account_id</code> или кнопки в списке игроков.", parse_mode="HTML")
+    await message.answer("Используйте <code>/lastmatch account_id</code> или кнопки в /players.", parse_mode="HTML")
 
 
 @router.message(F.text == MAIN_MENU_PROFILE)
 async def btn_profile(message: Message) -> None:
-    await message.answer("Используйте <code>/profile account_id</code> или кнопки в списке игроков.", parse_mode="HTML")
+    await message.answer("Используйте <code>/profile account_id</code> или кнопки в /players.", parse_mode="HTML")
 
 
 @router.message(F.text == MAIN_MENU_HELP)
 async def btn_help(message: Message) -> None:
     await message.answer(
         "Подсказка:\n"
-        "1) Добавьте игрока через /addplayer\n"
+        "1) Добавьте игрока через /addplayer (ID/Steam64/URL/ник)\n"
         "2) Откройте /players\n"
-        "3) Используйте кнопки для профиля, последнего матча и управления автоотчётами.",
+        "3) Используйте кнопки профиля, матча и управления автоотслеживанием.",
     )
 
 
@@ -171,17 +202,9 @@ async def cb_remove_player(callback: CallbackQuery) -> None:
     await callback.answer("Игрок удалён." if ok else "Игрок не найден.")
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("tr:on:"))
-async def cb_track_on(callback: CallbackQuery) -> None:
+@router.callback_query(lambda c: c.data and c.data.startswith("tg:"))
+async def cb_toggle_tracking(callback: CallbackQuery) -> None:
     players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
-    player_id = callback.data.split(":", maxsplit=2)[2]
-    ok = players_repo.set_auto_reports(callback.from_user.id, player_id, True)
-    await callback.answer("Автоотслеживание включено." if ok else "Игрок не найден.")
-
-
-@router.callback_query(lambda c: c.data and c.data.startswith("tr:off:"))
-async def cb_track_off(callback: CallbackQuery) -> None:
-    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
-    player_id = callback.data.split(":", maxsplit=2)[2]
-    ok = players_repo.set_auto_reports(callback.from_user.id, player_id, False)
-    await callback.answer("Автоотслеживание отключено." if ok else "Игрок не найден.")
+    _, player_id, toggle_to = callback.data.split(":", maxsplit=2)
+    ok = players_repo.set_auto_reports(callback.from_user.id, player_id, toggle_to == "on")
+    await callback.answer("Статус автоотслеживания обновлён." if ok else "Игрок не найден.")
