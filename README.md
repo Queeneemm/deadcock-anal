@@ -1,4 +1,4 @@
-# Deadlock Scout Bot
+# DeadCock ANALis
 
 Telegram-бот на Python (aiogram + SQLite) для персонального трекинга игроков Deadlock: история матчей, профиль, аналитика, карточки матча, мета и статистика по героям.
 

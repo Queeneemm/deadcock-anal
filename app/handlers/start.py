@@ -10,7 +10,7 @@ router = Router()
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     await message.answer(
-        "<b>Привет!</b> Это персональный Deadlock tracker-бот.\n"
+        "<b>Привет!</b> Это персональный бот DeadCock ANALis.\n"
         "Поддерживаются account_id, Steam64, steamcommunity URL и ник Steam.\n"
         "Используйте кнопки меню ниже — так быстрее и удобнее.",
         parse_mode="HTML",
