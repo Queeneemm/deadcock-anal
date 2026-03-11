@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class RateLimiter:
     interval_seconds: float = 1.0
+    _lock: asyncio.Lock = field(init=False, repr=False)
+    _last_call_monotonic: float = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._lock = asyncio.Lock()
