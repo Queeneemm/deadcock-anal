@@ -3,9 +3,14 @@ from datetime import datetime
 from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, FSInputFile, Message
-from httpx import HTTPStatusError
 
-from app.clients.deadlock_api import DeadlockApiClient
+from app.clients.deadlock_api import (
+    DeadlockApiClient,
+    DeadlockApiError,
+    DeadlockApiNotFoundError,
+    DeadlockApiTemporaryError,
+    DeadlockApiUnsupportedRouteError,
+)
 from app.keyboards.inline import report_actions_keyboard
 from app.models import MatchSummary
 from app.repositories.matches import MatchesRepository
@@ -36,17 +41,20 @@ async def _send_profile(message: Message, player_id: str) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
     try:
         profile = await api.get_player_profile(player_id)
-    except HTTPStatusError as exc:
-        if exc.response.status_code == 404:
-            await message.answer(
-                "Игрок не найден в API. Проверьте ID (возможна путаница между SteamID64 и account_id)."
-            )
-            return
-        raise
+    except DeadlockApiNotFoundError:
+        await message.answer("Профиль не найден. Проверьте account_id или SteamID64.")
+        return
+    except DeadlockApiTemporaryError:
+        await message.answer("API временно недоступен. Попробуйте позже.")
+        return
+    except DeadlockApiError:
+        await message.answer("Не удалось получить профиль из API.")
+        return
+
     await message.answer(
         f"<b>Профиль игрока</b>\n"
-        f"ID: <code>{profile.get('player_id', player_id)}</code>\n"
-        f"Ник: <b>{profile.get('display_name', '—')}</b>\n"
+        f"ID: <code>{profile.get('account_id', profile.get('player_id', player_id))}</code>\n"
+        f"Ник: <b>{profile.get('display_name', profile.get('personaname', '—'))}</b>\n"
         f"MMR: <b>{profile.get('mmr', '—')}</b>",
         parse_mode="HTML",
     )
@@ -60,21 +68,38 @@ async def _send_last_match(message: Message, player_id: str) -> None:
 
     try:
         matches = await api.get_player_recent_matches(player_id)
-    except HTTPStatusError as exc:
-        if exc.response.status_code == 404:
-            await message.answer(
-                "Не удалось найти игрока/матчи в API. Проверьте ID (SteamID64/account_id)."
-            )
-            return
-        raise
+    except DeadlockApiNotFoundError:
+        await message.answer("История матчей не найдена. Проверьте account_id.")
+        return
+    except DeadlockApiTemporaryError:
+        await message.answer("API временно недоступен. Попробуйте позже.")
+        return
+    except DeadlockApiError:
+        await message.answer("Не удалось получить историю матчей.")
+        return
+
     if not matches:
         await message.answer("Не удалось получить матчи игрока.")
         return
-    match_id = str(matches[0].get("match_id") or matches[0].get("id"))
-    match_payload = await api.get_match(match_id)
-    parsed = api.parse_match_for_player(match_payload, player_id)
+
+    latest = matches[0]
+    match_id = str(latest.get("match_id") or latest.get("id") or "")
+    parsed = None
+
+    if match_id:
+        try:
+            match_payload = await api.get_match(match_id)
+            parsed = api.parse_match_for_player(match_payload, player_id)
+        except DeadlockApiUnsupportedRouteError:
+            parsed = api.parse_match_for_player(latest, player_id)
+        except DeadlockApiNotFoundError:
+            parsed = api.parse_match_for_player(latest, player_id)
+
+    if parsed is None:
+        parsed = api.parse_match_for_player(latest, player_id)
+
     summary = MatchSummary(
-        match_id=parsed["match_id"],
+        match_id=parsed["match_id"] or match_id or "unknown",
         match_datetime=datetime.fromisoformat(parsed["match_datetime"].replace("Z", "+00:00")),
         hero_name=parsed["hero_name"],
         is_win=parsed["is_win"],
@@ -107,7 +132,7 @@ async def _send_last_match(message: Message, player_id: str) -> None:
 async def cmd_profile(message: Message) -> None:
     args = (message.text or "").split(maxsplit=1)
     if len(args) < 2:
-        await message.answer("Использование: <code>/profile player_id</code>", parse_mode="HTML")
+        await message.answer("Использование: <code>/profile account_id</code>", parse_mode="HTML")
         return
     await _send_profile(message, args[1])
 
@@ -116,7 +141,7 @@ async def cmd_profile(message: Message) -> None:
 async def cmd_lastmatch(message: Message) -> None:
     args = (message.text or "").split(maxsplit=1)
     if len(args) < 2:
-        await message.answer("Использование: <code>/lastmatch player_id</code>", parse_mode="HTML")
+        await message.answer("Использование: <code>/lastmatch account_id</code>", parse_mode="HTML")
         return
     await _send_last_match(message, args[1])
 
@@ -145,19 +170,6 @@ async def cb_autoff(callback: CallbackQuery) -> None:
 
 @router.callback_query(lambda c: c.data and c.data.startswith("profile:"))
 async def cb_profile(callback: CallbackQuery) -> None:
-    api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
     player_id = callback.data.split(":")[1]
-    try:
-        profile = await api.get_player_profile(player_id)
-    except HTTPStatusError as exc:
-        if exc.response.status_code == 404:
-            await callback.message.answer("Профиль не найден. Проверьте ID игрока.")
-            await callback.answer()
-            return
-        raise
-    await callback.message.answer(
-        f"Профиль: <b>{profile.get('display_name', player_id)}</b>\n"
-        f"MMR: <b>{profile.get('mmr', '—')}</b>",
-        parse_mode="HTML",
-    )
+    await _send_profile(callback.message, player_id)
     await callback.answer()

@@ -11,7 +11,7 @@ router = Router()
 async def cmd_start(message: Message) -> None:
     await message.answer(
         "<b>Привет!</b> Я бот для отслеживания матчей Deadlock.\n"
-        "Теперь можно пользоваться кнопками внизу — без ручного ввода команд.",
+        "Работаю по account_id (или ссылке на Steam-профиль).",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )
@@ -26,12 +26,12 @@ async def cmd_help(message: Message) -> None:
         "• 📄 Последний матч — выберите игрока кнопкой\n"
         "• 🧾 Профиль — выберите игрока кнопкой\n\n"
         "<b>Команды тоже работают:</b>\n"
-        "/addplayer &lt;player_id|ник|ссылка_steam_profile&gt;\n"
+        "/addplayer &lt;account_id|ссылка_steam_profile&gt;\n"
         "/players\n"
-        "/removeplayer &lt;player_id&gt;\n"
-        "/track &lt;player_id&gt; &lt;on|off&gt;\n"
-        "/lastmatch &lt;player_id&gt;\n"
-        "/profile &lt;player_id&gt;",
+        "/removeplayer &lt;account_id&gt;\n"
+        "/track &lt;account_id&gt; &lt;on|off&gt;\n"
+        "/lastmatch &lt;account_id&gt;\n"
+        "/profile &lt;account_id&gt;",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )

@@ -5,7 +5,12 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from app.clients.deadlock_api import DeadlockApiClient
+from app.clients.deadlock_api import (
+    DeadlockApiClient,
+    DeadlockApiError,
+    DeadlockApiNotFoundError,
+    DeadlockApiUnsupportedRouteError,
+)
 from app.keyboards.inline import (
     MAIN_MENU_ADD_PLAYER,
     MAIN_MENU_HELP,
@@ -36,48 +41,57 @@ async def cmd_addplayer(message: Message) -> None:
     users_repo.ensure_user(message.from_user.id)
     args = (message.text or "").split(maxsplit=1)
     if len(args) < 2:
-        await message.answer("Использование: <code>/addplayer player_id|ник|steam_profile_url</code>", parse_mode="HTML")
+        await message.answer("Использование: <code>/addplayer account_id|steam_profile_url</code>", parse_mode="HTML")
         return
+
     query = args[1].strip()
-
-    player_id = query
+    account_id: str | None = None
     display_name = query
-    search_queries: list[str] = [query]
-    if re.match(r"^https?://steamcommunity\.com/(profiles|id)/", query, flags=re.IGNORECASE):
-        resolved = await api.resolve_steam_profile_to_player_id(query)
-        if not resolved:
-            await message.answer("Не удалось прочитать Steam-профиль по ссылке. Проверьте ссылку и приватность профиля.")
-            return
-        player_id = resolved
-        display_name = resolved
-        search_queries = [resolved, query]
 
-    for search_query in search_queries:
-        variants = await api.resolve_player(search_query)
-        if len(variants) == 1 and variants[0].get("player_id"):
-            player_id = str(variants[0].get("player_id"))
-            display_name = variants[0].get("display_name", display_name)
-            break
-
-    if not player_id.isdigit():
-        variants = await api.resolve_player(query)
-        if len(variants) == 1:
-            player_id = str(variants[0].get("player_id"))
-            display_name = variants[0].get("display_name", query)
-        elif len(variants) > 1:
-            await message.answer(
-                "Найдено несколько игроков. Для MVP используйте точный <code>player_id</code>.\n"
-                "TODO: интерактивный выбор из нескольких кандидатов.",
-                parse_mode="HTML",
-            )
-            return
+    try:
+        if re.match(r"^https?://steamcommunity\.com/(profiles|id)/", query, flags=re.IGNORECASE):
+            account_id = await api.resolve_steam_profile_to_account_id(query)
+            if not account_id:
+                await message.answer("Не удалось прочитать Steam-профиль. Проверьте ссылку и приватность профиля.")
+                return
+        elif query.isdigit():
+            account_id = api.normalize_account_id(query)
         else:
-            await message.answer("Игрок не найден. Проверьте ID или ник.")
-            return
+            # Маршрут поиска не подтверждён — оставляем мягкий fallback.
+            await api.resolve_player(query)
+    except DeadlockApiUnsupportedRouteError:
+        await message.answer(
+            "Поиск по нику отключён: маршрут поиска не подтверждён в API. "
+            "Используйте account_id или ссылку на Steam-профиль.",
+        )
+        return
+    except (DeadlockApiError, ValueError):
+        logger.exception("Ошибка при добавлении игрока: %s", query)
+        await message.answer("Не удалось обработать ввод. Укажите корректный account_id или ссылку Steam.")
+        return
 
-    created = players_repo.add_player(message.from_user.id, player_id, display_name)
+    if not account_id:
+        await message.answer("Не удалось определить account_id. Используйте число account_id или ссылку Steam.")
+        return
+
+    try:
+        profile = await api.get_player_profile(account_id)
+        display_name = str(
+            profile.get("display_name")
+            or profile.get("personaname")
+            or profile.get("name")
+            or account_id
+        )
+    except DeadlockApiNotFoundError:
+        logger.info("Профиль не найден для account_id=%s, сохраним ID как имя", account_id)
+        display_name = account_id
+    except DeadlockApiError:
+        logger.warning("Не удалось получить профиль для account_id=%s", account_id)
+        display_name = account_id
+
+    created = players_repo.add_player(message.from_user.id, account_id, display_name)
     if created:
-        await message.answer(f"Игрок <b>{display_name}</b> добавлен в отслеживание.", parse_mode="HTML")
+        await message.answer(f"Игрок <b>{display_name}</b> (<code>{account_id}</code>) добавлен в отслеживание.", parse_mode="HTML")
     else:
         await message.answer("Этот игрок уже отслеживается.")
 
@@ -105,7 +119,7 @@ async def cmd_removeplayer(message: Message) -> None:
     players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
     args = (message.text or "").split(maxsplit=1)
     if len(args) < 2:
-        await message.answer("Использование: <code>/removeplayer player_id</code>", parse_mode="HTML")
+        await message.answer("Использование: <code>/removeplayer account_id</code>", parse_mode="HTML")
         return
     if players_repo.remove_player(message.from_user.id, args[1].strip()):
         await message.answer("Игрок удалён из отслеживания.")
@@ -118,7 +132,7 @@ async def cmd_track(message: Message) -> None:
     players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
     args = (message.text or "").split(maxsplit=2)
     if len(args) < 3 or args[2] not in {"on", "off"}:
-        await message.answer("Использование: <code>/track player_id on|off</code>", parse_mode="HTML")
+        await message.answer("Использование: <code>/track account_id on|off</code>", parse_mode="HTML")
         return
     enabled = args[2] == "on"
     updated = players_repo.set_auto_reports(message.from_user.id, args[1], enabled)
@@ -131,7 +145,7 @@ async def cmd_track(message: Message) -> None:
 @router.message(F.text == MAIN_MENU_ADD_PLAYER)
 async def btn_add_player(message: Message) -> None:
     await message.answer(
-        "Отправьте: <code>/addplayer player_id</code>, <code>/addplayer ник</code> "
+        "Отправьте: <code>/addplayer account_id</code> "
         "или <code>/addplayer https://steamcommunity.com/...</code>",
         parse_mode="HTML",
     )
@@ -144,35 +158,43 @@ async def btn_players(message: Message) -> None:
 
 @router.message(F.text == MAIN_MENU_LAST_MATCH)
 async def btn_last_match(message: Message) -> None:
-    await message.answer("Нажмите «👥 Мои игроки» и выберите «📄 Матч» у нужного игрока.")
+    await message.answer("Используйте <code>/lastmatch account_id</code> или кнопки в списке игроков.", parse_mode="HTML")
 
 
 @router.message(F.text == MAIN_MENU_PROFILE)
 async def btn_profile(message: Message) -> None:
-    await message.answer("Нажмите «👥 Мои игроки» и выберите «🧾 Профиль» у нужного игрока.")
+    await message.answer("Используйте <code>/profile account_id</code> или кнопки в списке игроков.", parse_mode="HTML")
 
 
 @router.message(F.text == MAIN_MENU_HELP)
 async def btn_help(message: Message) -> None:
-    await message.answer("Используйте кнопки меню ниже для управления ботом или введите /help.")
+    await message.answer(
+        "Подсказка:\n"
+        "1) Добавьте игрока через /addplayer\n"
+        "2) Откройте /players\n"
+        "3) Используйте кнопки для профиля, последнего матча и управления автоотчётами.",
+    )
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("rm:"))
 async def cb_remove_player(callback: CallbackQuery) -> None:
     players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
-    player_id = callback.data.split(":", maxsplit=1)[1]
+    player_id = callback.data.split(":")[1]
     ok = players_repo.remove_player(callback.from_user.id, player_id)
     await callback.answer("Игрок удалён." if ok else "Игрок не найден.")
-    if ok:
-        await callback.message.edit_reply_markup(reply_markup=None)
 
 
-@router.callback_query(lambda c: c.data and c.data.startswith("tg:"))
-async def cb_toggle_track(callback: CallbackQuery) -> None:
+@router.callback_query(lambda c: c.data and c.data.startswith("tr:on:"))
+async def cb_track_on(callback: CallbackQuery) -> None:
     players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
-    _, player_id, state = callback.data.split(":", maxsplit=2)
-    enabled = state == "on"
-    ok = players_repo.set_auto_reports(callback.from_user.id, player_id, enabled)
-    await callback.answer("Автоотчёты обновлены." if ok else "Игрок не найден.")
-    if ok:
-        await callback.message.edit_reply_markup(reply_markup=players_management_keyboard(player_id, enabled))
+    player_id = callback.data.split(":", maxsplit=2)[2]
+    ok = players_repo.set_auto_reports(callback.from_user.id, player_id, True)
+    await callback.answer("Автоотслеживание включено." if ok else "Игрок не найден.")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("tr:off:"))
+async def cb_track_off(callback: CallbackQuery) -> None:
+    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
+    player_id = callback.data.split(":", maxsplit=2)[2]
+    ok = players_repo.set_auto_reports(callback.from_user.id, player_id, False)
+    await callback.answer("Автоотслеживание отключено." if ok else "Игрок не найден.")
