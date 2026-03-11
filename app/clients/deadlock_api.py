@@ -274,6 +274,10 @@ class DeadlockApiClient:
     async def get_player_recent_matches(self, account_id: str | int, limit: int = 20) -> list[dict[str, Any]]:
         return (await self.get_match_history(account_id))[:limit]
 
+    async def get_last_match(self, account_id: str | int) -> dict[str, Any] | None:
+        history = await self.get_match_history(account_id)
+        return history[0] if history else None
+
     async def get_player_hero_stats(self, account_ids: list[str] | list[int]) -> list[dict[str, Any]]:
         normalized = [self.normalize_account_id(value) for value in account_ids]
         data = await self._request("GET", self.routes.hero_stats, params={"account_ids": ",".join(normalized)})
