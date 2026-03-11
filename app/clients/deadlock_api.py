@@ -77,7 +77,7 @@ class DeadlockApiClient:
         routes: DeadlockApiRoutes | None = None,
         max_retries: int = 4,
         retry_base_delay: float = 1.0,
-        match_history_ttl_seconds: int = 20,
+        match_history_ttl_seconds: int = 1800,
         enable_cache: bool = True,
     ):
         self.base_url = base_url.rstrip("/") + "/"
@@ -88,7 +88,7 @@ class DeadlockApiClient:
         self.retry_base_delay = max(0.1, retry_base_delay)
         self.match_history_ttl_seconds = max(0, match_history_ttl_seconds)
         self.enable_cache = enable_cache
-        self._match_history_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._match_history_cache: dict[str, dict[str, Any]] = {}
         self.client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
 
     async def close(self) -> None:
@@ -222,20 +222,54 @@ class DeadlockApiClient:
         data = await self._request("GET", self.routes.steam_profiles, params={"account_ids": ",".join(normalized)})
         return self._extract_list_payload(data)
 
+    def _is_cache_valid(self, fetched_at: float, ttl: int) -> bool:
+        if ttl <= 0:
+            return False
+        now = asyncio.get_running_loop().time()
+        return (now - fetched_at) < ttl
+
+    def _get_cached_match_history(self, account_id: str | int) -> dict[str, Any] | None:
+        normalized = self.normalize_account_id(account_id)
+        cache_entry = self._match_history_cache.get(normalized)
+        if not cache_entry:
+            return None
+        fetched_at = cache_entry.get("fetched_at")
+        data = cache_entry.get("data")
+        if not isinstance(fetched_at, (int, float)) or not isinstance(data, list):
+            self._match_history_cache.pop(normalized, None)
+            return None
+        return {"account_id": normalized, "fetched_at": float(fetched_at), "data": data}
+
+    def _set_cached_match_history(self, account_id: str | int, data: list[dict[str, Any]]) -> None:
+        normalized = self.normalize_account_id(account_id)
+        self._match_history_cache[normalized] = {
+            "fetched_at": asyncio.get_running_loop().time(),
+            "data": data,
+        }
+
     async def get_match_history(self, account_id: str | int) -> list[dict[str, Any]]:
         normalized = self.normalize_account_id(account_id)
-        if self.enable_cache and self.match_history_ttl_seconds > 0:
-            cached = self._match_history_cache.get(normalized)
-            now = asyncio.get_running_loop().time()
-            if cached and cached[0] > now:
-                return cached[1]
+        cache_entry = self._get_cached_match_history(normalized) if self.enable_cache else None
 
-        data = await self._request("GET", self.routes.match_history.format(account_id=normalized))
-        payload = self._extract_list_payload(data)
-        if self.enable_cache and self.match_history_ttl_seconds > 0:
-            expires_at = asyncio.get_running_loop().time() + self.match_history_ttl_seconds
-            self._match_history_cache[normalized] = (expires_at, payload)
-        return payload
+        if cache_entry and self._is_cache_valid(cache_entry["fetched_at"], self.match_history_ttl_seconds):
+            logger.info("Использован кэш match-history для account_id=%s", normalized)
+            return cache_entry["data"]
+
+        if cache_entry:
+            logger.info("Кэш match-history устарел, запрашиваем API... account_id=%s", normalized)
+
+        try:
+            data = await self._request("GET", self.routes.match_history.format(account_id=normalized))
+            payload = self._extract_list_payload(data)
+            if self.enable_cache and self.match_history_ttl_seconds > 0:
+                self._set_cached_match_history(normalized, payload)
+            return payload
+        except DeadlockApiTemporaryError:
+            if cache_entry:
+                logger.warning("API вернул временную ошибку, отдан устаревший кэш для account_id=%s", normalized)
+                return cache_entry["data"]
+            logger.warning("API вернул временную ошибку и кэш отсутствует")
+            raise
 
     async def get_player_recent_matches(self, account_id: str | int, limit: int = 20) -> list[dict[str, Any]]:
         return (await self.get_match_history(account_id))[:limit]
