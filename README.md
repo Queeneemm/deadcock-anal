@@ -43,24 +43,37 @@ Telegram-бот на Python (aiogram + SQLite) для персонального
 4. Если найдено несколько профилей — бот предлагает `/pickplayer N`.
 5. В БД канонически сохраняется `account_id`, а также `display_name` и `steam_profile_url` (если есть).
 
+
+## Шрифты для PNG-карточек (русский текст)
+
+Чтобы русский текст в PNG отображался корректно, положите TTF-файлы в `assets/fonts/`:
+
+- `NotoSans-Regular.ttf`
+- `NotoSans-Bold.ttf`
+
+Рекомендуемый источник: семейство **Noto Sans** (поддерживает кириллицу).
+Можно также использовать DejaVu (`DejaVuSans.ttf` / `DejaVuSans-Bold.ttf`).
+
 ## Команды
 
 - `/addplayer`
 - `/pickplayer`
 - `/players`
-- `/lastmatch`
-- `/profile`
-- `/heroes`
-- `/besthero`
+- `/lastmatch [account_id]`
+- `/profile [account_id]`
+- `/heroes [account_id]`
+- `/besthero [account_id]`
 - `/hero <account_id> <hero_id>`
-- `/teammates`
-- `/enemies`
-- `/party`
+- `/teammates [account_id]`
+- `/enemies [account_id]`
+- `/party [account_id]`
 - `/meta`
 - `/synergy <hero_id>`
 - `/counter <hero_id>`
 - `/leaderboard <region>`
 - `/patches`
+
+Если `account_id` не передан, бот сначала ищет среди сохранённых игроков пользователя. Если профилей несколько — предлагает выбрать нужный через кнопку.
 
 ## History-only режим
 
