@@ -70,6 +70,7 @@ class MatchesRepository:
 
         summaries: list[MatchSummary] = []
         for row in rows:
+            raw_payload = json.loads(row["raw_payload_json"])
             summaries.append(
                 MatchSummary(
                     match_id=row["match_id"],
@@ -83,7 +84,8 @@ class MatchesRepository:
                     damage=row["damage"],
                     duration_seconds=0,
                     items=[],
-                    raw_payload=json.loads(row["raw_payload_json"]),
+                    raw_payload=raw_payload,
+                    hero_id=int((raw_payload or {}).get("hero_id") or 0) or None,
                 )
             )
         return summaries

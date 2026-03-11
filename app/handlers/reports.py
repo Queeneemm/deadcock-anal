@@ -70,6 +70,7 @@ async def _send_profile(message: Message, player_id: str) -> None:
                 match_datetime=datetime.fromisoformat(parsed["match_datetime"].replace("Z", "+00:00")),
                 hero_name=parsed["hero_name"],
                 is_win=parsed["is_win"],
+                hero_id=parsed.get("hero_id"),
                 kills=parsed["kills"],
                 deaths=parsed["deaths"],
                 assists=parsed["assists"],
@@ -151,6 +152,7 @@ async def _send_last_match(message: Message, player_id: str) -> None:
         match_datetime=datetime.fromisoformat(parsed["match_datetime"].replace("Z", "+00:00")),
         hero_name=parsed["hero_name"],
         is_win=parsed["is_win"],
+        hero_id=parsed.get("hero_id"),
         kills=parsed["kills"],
         deaths=parsed["deaths"],
         assists=parsed["assists"],
@@ -435,3 +437,14 @@ async def cb_profile(callback: CallbackQuery) -> None:
     player_id = callback.data.split(":")[1]
     await _send_profile(callback.message, player_id)
     await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("details:"))
+async def cb_details(callback: CallbackQuery) -> None:
+    _, _, match_id = callback.data.split(":", maxsplit=2)
+    await callback.answer(f"Детали матча {match_id} пока в разработке.")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("prev:"))
+async def cb_prev(callback: CallbackQuery) -> None:
+    await callback.answer("Переход к предыдущему матчу пока в разработке.")
