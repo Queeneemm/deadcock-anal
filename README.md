@@ -55,15 +55,10 @@ cp .env.example .env
 python -m app.bot
 ```
 
-## Команды бота
-- `/start`
-- `/help`
-- `/addplayer <player_id|ник>`
-- `/players`
-- `/removeplayer <player_id>`
-- `/track <player_id> on|off`
-- `/lastmatch <player_id>`
-- `/profile <player_id>`
+## Управление ботом
+- Через кнопки в нижнем меню: добавление игрока, список игроков, просмотр последнего матча и профиля.
+- Через inline-кнопки в списке игроков: «Матч», «Профиль», переключение автоотчётов и удаление игрока.
+- Команды также поддерживаются: `/start`, `/help`, `/addplayer`, `/players`, `/removeplayer`, `/track`, `/lastmatch`, `/profile`.
 
 ## Автоотслеживание
 - Бот периодически опрашивает всех игроков с включённым `auto_reports_enabled`.

@@ -31,35 +31,23 @@ def setup_reports_dependencies(
     router.cards = cards  # type: ignore[attr-defined]
 
 
-@router.message(Command("profile"))
-async def cmd_profile(message: Message) -> None:
+async def _send_profile(message: Message, player_id: str) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
-    args = (message.text or "").split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer("Использование: <code>/profile player_id</code>", parse_mode="HTML")
-        return
-    profile = await api.get_player_profile(args[1])
+    profile = await api.get_player_profile(player_id)
     await message.answer(
         f"<b>Профиль игрока</b>\n"
-        f"ID: <code>{profile.get('player_id', args[1])}</code>\n"
+        f"ID: <code>{profile.get('player_id', player_id)}</code>\n"
         f"Ник: <b>{profile.get('display_name', '—')}</b>\n"
         f"MMR: <b>{profile.get('mmr', '—')}</b>",
         parse_mode="HTML",
     )
 
 
-@router.message(Command("lastmatch"))
-async def cmd_lastmatch(message: Message) -> None:
+async def _send_last_match(message: Message, player_id: str) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
     matches_repo: MatchesRepository = router.matches_repo  # type: ignore[attr-defined]
     analytics: AnalyticsService = router.analytics  # type: ignore[attr-defined]
     cards: CardRenderer = router.cards  # type: ignore[attr-defined]
-
-    args = (message.text or "").split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer("Использование: <code>/lastmatch player_id</code>", parse_mode="HTML")
-        return
-    player_id = args[1]
 
     matches = await api.get_player_recent_matches(player_id)
     if not matches:
@@ -96,6 +84,38 @@ async def cmd_lastmatch(message: Message) -> None:
         caption="Последний матч сформирован вручную.",
         reply_markup=report_actions_keyboard(player_id, summary.match_id),
     )
+
+
+@router.message(Command("profile"))
+async def cmd_profile(message: Message) -> None:
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("Использование: <code>/profile player_id</code>", parse_mode="HTML")
+        return
+    await _send_profile(message, args[1])
+
+
+@router.message(Command("lastmatch"))
+async def cmd_lastmatch(message: Message) -> None:
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("Использование: <code>/lastmatch player_id</code>", parse_mode="HTML")
+        return
+    await _send_last_match(message, args[1])
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("lm:"))
+async def cb_lastmatch(callback: CallbackQuery) -> None:
+    player_id = callback.data.split(":", maxsplit=1)[1]
+    await _send_last_match(callback.message, player_id)
+    await callback.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("rp:"))
+async def cb_profile_button(callback: CallbackQuery) -> None:
+    player_id = callback.data.split(":", maxsplit=1)[1]
+    await _send_profile(callback.message, player_id)
+    await callback.answer()
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("autoff:"))
