@@ -4,6 +4,7 @@ from datetime import datetime
 
 from aiogram import Bot
 from aiogram.types import FSInputFile
+from httpx import HTTPStatusError
 
 from app.clients.deadlock_api import DeadlockApiClient
 from app.keyboards.inline import report_actions_keyboard
@@ -51,7 +52,13 @@ class PollingService:
             await self._process_player(player)
 
     async def _process_player(self, tracked: TrackedPlayer) -> None:
-        recent = await self.api.get_player_recent_matches(tracked.player_id)
+        try:
+            recent = await self.api.get_player_recent_matches(tracked.player_id)
+        except HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                logger.warning("Игрок %s не найден в Deadlock API", tracked.player_id)
+                return
+            raise
         if not recent:
             return
         matches_ordered = list(reversed(recent))
