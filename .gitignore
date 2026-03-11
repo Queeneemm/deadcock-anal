@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+cache/assets/*
+!cache/assets/.gitkeep
+cards/*
+!cards/.gitkeep
+data/*.db
