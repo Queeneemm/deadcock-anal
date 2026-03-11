@@ -35,7 +35,8 @@ async def cmd_help(message: Message) -> None:
         "/meta\n"
         "/synergy &lt;hero_id&gt;\n"
         "/counter &lt;hero_id&gt;\n"
-        "/leaderboard &lt;region&gt;",
+        "/leaderboard &lt;region&gt;\n"
+        "/patches",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
     )

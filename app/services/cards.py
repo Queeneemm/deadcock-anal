@@ -36,12 +36,12 @@ class CardRenderer:
         card.alpha_composite(rounded_rectangle_overlay((1020, 260), 24, (25, 27, 36, 210)), (30, 30))
         draw.rectangle((30, 30, 44, 290), fill=accent)
 
-        result = "Победа" if summary.is_win else "Поражение"
+        result = "Victory" if summary.is_win else "Defeat"
         draw.text((70, 55), safe_text(f"{player_name} — {summary.hero_name}", font_title), fill=(255, 255, 255), font=font_title)
-        draw.text((70, 115), safe_text(f"Результат: {result}", font_text), fill=accent, font=font_text)
-        draw.text((70, 160), safe_text(f"Матч ID: {summary.match_id}", font_small), fill=(220, 220, 220), font=font_small)
-        draw.text((70, 195), safe_text(f"Дата: {summary.match_datetime.strftime('%d.%m.%Y %H:%M')}", font_small), fill=(180, 180, 185), font=font_small)
-        draw.text((70, 230), safe_text(f"Длительность: {summary.duration_seconds // 60} мин", font_small), fill=(180, 180, 185), font=font_small)
+        draw.text((70, 115), safe_text(f"Result: {result}", font_text), fill=accent, font=font_text)
+        draw.text((70, 160), safe_text(f"Match ID: {summary.match_id}", font_small), fill=(220, 220, 220), font=font_small)
+        draw.text((70, 195), safe_text(f"Date: {summary.match_datetime.strftime('%d.%m.%Y %H:%M')}", font_small), fill=(180, 180, 185), font=font_small)
+        draw.text((70, 230), safe_text(f"Duration: {summary.duration_seconds // 60} min", font_small), fill=(180, 180, 185), font=font_small)
 
         card.alpha_composite(rounded_rectangle_overlay((1020, 170), 20, (20, 22, 30, 220)), (30, 320))
         draw.text(
@@ -56,14 +56,13 @@ class CardRenderer:
 
         y = 520
         sections = [
-            ("Что было плохо", analytics.bad_points),
-            ("Что улучшилось относительно прошлого матча", analytics.improved_points),
-            ("Анти-тильт", [analytics.anti_tilt]),
+            ("What went wrong", analytics.bad_points),
+            ("What improved since last match", analytics.improved_points),
+            ("Anti-tilt", [analytics.anti_tilt]),
             (
-                "Лучший герой за неделю",
+                "Best hero of the week",
                 [
-                    f"{analytics.best_hero_week['hero_name']} — матчей: {analytics.best_hero_week['matches']}, "
-                    f"winrate: {analytics.best_hero_week['winrate']}%"
+                    f"{analytics.best_hero_week['hero_name']} — matches: {analytics.best_hero_week['matches']}, winrate: {analytics.best_hero_week['winrate']}%"
                 ],
             ),
         ]

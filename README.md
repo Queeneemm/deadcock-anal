@@ -19,6 +19,7 @@ Telegram-бот на Python (aiogram + SQLite) для персонального
 - `GET /v1/analytics/hero-counter-stats`
 - `GET /v1/analytics/hero-stats`
 - `GET /v1/info`
+- `GET /v1/patches`
 
 Служебно доступны: `/docs`, `/openapi.json`.
 
@@ -59,6 +60,7 @@ Telegram-бот на Python (aiogram + SQLite) для персонального
 - `/synergy <hero_id>`
 - `/counter <hero_id>`
 - `/leaderboard <region>`
+- `/patches`
 
 ## History-only режим
 
@@ -108,4 +110,5 @@ curl -sS "$BASE_URL/v1/analytics/hero-stats"
 curl -sS "$BASE_URL/v1/analytics/hero-synergy-stats"
 curl -sS "$BASE_URL/v1/analytics/hero-counter-stats"
 curl -sS "$BASE_URL/v1/leaderboard/Europe"
+curl -sS "$BASE_URL/v1/patches"
 ```

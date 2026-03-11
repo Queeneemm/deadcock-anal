@@ -410,6 +410,26 @@ async def cmd_leaderboard(message: Message) -> None:
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+
+
+@router.message(Command("patches"))
+async def cmd_patches(message: Message) -> None:
+    api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
+    patches = await api.get_patches()
+    if not patches:
+        await message.answer("No patch data available right now.")
+        return
+
+    lines = ["<b>Latest Deadlock patches</b>"]
+    for patch in patches[:8]:
+        version = patch.get("title") or patch.get("version") or patch.get("name") or patch.get("patch") or "Unknown version"
+        ts = patch.get("pub_date") or patch.get("released_at") or patch.get("release_date") or patch.get("date")
+        if ts:
+            lines.append(f"• <b>{version}</b> — {ts}")
+        else:
+            lines.append(f"• <b>{version}</b>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
 @router.callback_query(lambda c: c.data and c.data.startswith("lm:"))
 async def cb_lastmatch(callback: CallbackQuery) -> None:
     player_id = callback.data.split(":", maxsplit=1)[1]
