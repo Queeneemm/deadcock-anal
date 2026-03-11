@@ -4,9 +4,14 @@ from datetime import datetime
 
 from aiogram import Bot
 from aiogram.types import FSInputFile
-from httpx import HTTPStatusError
 
-from app.clients.deadlock_api import DeadlockApiClient
+from app.clients.deadlock_api import (
+    DeadlockApiClient,
+    DeadlockApiError,
+    DeadlockApiNotFoundError,
+    DeadlockApiTemporaryError,
+    DeadlockApiUnsupportedRouteError,
+)
 from app.keyboards.inline import report_actions_keyboard
 from app.models import MatchSummary, TrackedPlayer
 from app.repositories.matches import MatchesRepository, ReportsRepository
@@ -37,6 +42,7 @@ class PollingService:
         self.analytics = analytics
         self.cards = cards
         self.poll_interval_seconds = poll_interval_seconds
+        self._warned_keys: set[str] = set()
 
     async def run_forever(self) -> None:
         while True:
@@ -51,16 +57,28 @@ class PollingService:
         for player in tracked:
             await self._process_player(player)
 
+    def _warn_once(self, key: str, message: str, *args: object) -> None:
+        if key in self._warned_keys:
+            return
+        self._warned_keys.add(key)
+        logger.warning(message, *args)
+
     async def _process_player(self, tracked: TrackedPlayer) -> None:
         try:
             recent = await self.api.get_player_recent_matches(tracked.player_id)
-        except HTTPStatusError as exc:
-            if exc.response.status_code == 404:
-                logger.warning("Игрок %s не найден в Deadlock API", tracked.player_id)
-                return
-            raise
+        except DeadlockApiNotFoundError:
+            self._warn_once(f"notfound:{tracked.player_id}", "Игрок %s не найден в Deadlock API", tracked.player_id)
+            return
+        except DeadlockApiTemporaryError:
+            logger.info("Временная ошибка API для игрока %s, пропускаем тик", tracked.player_id)
+            return
+        except DeadlockApiError:
+            logger.exception("Ошибка API для игрока %s", tracked.player_id)
+            return
+
         if not recent:
             return
+
         matches_ordered = list(reversed(recent))
         for raw in matches_ordered:
             match_id = str(raw.get("match_id") or raw.get("id") or "")
@@ -68,10 +86,13 @@ class PollingService:
                 continue
             if self.reports_repo.was_sent(tracked.telegram_user_id, tracked.player_id, match_id):
                 continue
-            full_match = await self.api.get_match(match_id)
-            parsed = self.api.parse_match_for_player(full_match, tracked.player_id)
+
+            parsed = await self._get_match_data_for_player(tracked.player_id, raw, match_id)
+            if not parsed:
+                continue
+
             summary = MatchSummary(
-                match_id=parsed["match_id"],
+                match_id=parsed["match_id"] or match_id,
                 match_datetime=datetime.fromisoformat(parsed["match_datetime"].replace("Z", "+00:00")),
                 hero_name=parsed["hero_name"],
                 is_win=parsed["is_win"],
@@ -86,7 +107,7 @@ class PollingService:
                 team_souls_rank=parsed.get("team_souls_rank"),
                 raw_payload=parsed.get("raw_payload"),
             )
-            self.matches_repo.cache_match(match_id, full_match, parsed)
+            self.matches_repo.cache_match(match_id, parsed.get("raw_payload") or raw, parsed)
             self.matches_repo.store_player_match_history(tracked.player_id, summary)
 
             recent_matches = self.matches_repo.get_recent_player_matches(tracked.player_id, 20)
@@ -113,3 +134,20 @@ class PollingService:
             self.reports_repo.mark_sent(tracked.telegram_user_id, tracked.player_id, match_id)
             self.players_repo.update_last_seen_match(tracked.id, match_id)
             self.players_repo.update_last_sent_match(tracked.id, match_id)
+
+    async def _get_match_data_for_player(self, player_id: str, history_item: dict, match_id: str) -> dict | None:
+        try:
+            full_match = await self.api.get_match(match_id)
+            return self.api.parse_match_for_player(full_match, player_id)
+        except DeadlockApiUnsupportedRouteError:
+            self._warn_once("unsupported:match_details", "Детали матча отключены: маршрут не подтверждён, используем match-history")
+            return self.api.parse_match_for_player(history_item, player_id)
+        except DeadlockApiNotFoundError:
+            self._warn_once(f"match404:{match_id}", "Матч %s не найден, используем данные из match-history", match_id)
+            return self.api.parse_match_for_player(history_item, player_id)
+        except DeadlockApiTemporaryError:
+            logger.info("Временная ошибка при чтении матча %s", match_id)
+            return self.api.parse_match_for_player(history_item, player_id)
+        except DeadlockApiError:
+            logger.exception("Не удалось обработать матч %s", match_id)
+            return None
