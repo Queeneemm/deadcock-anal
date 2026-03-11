@@ -8,14 +8,17 @@ from app.clients.deadlock_api import DeadlockApiClient, DeadlockApiError
 from app.keyboards.inline import (
     MAIN_MENU_ADD_PLAYER,
     MAIN_MENU_ANALYTICS,
+    MAIN_MENU_DASHBOARD,
     MAIN_MENU_HELP,
     MAIN_MENU_LAST_MATCH,
+    MAIN_MENU_PATCHNOTES,
     MAIN_MENU_PLAYERS,
     MAIN_MENU_PROFILE,
     MAIN_MENU_SETTINGS,
     SETTINGS_DISABLE_AUTO,
     SETTINGS_ENABLE_AUTO,
     analytics_actions_keyboard,
+    patches_keyboard,
     players_management_keyboard,
     settings_keyboard,
 )
@@ -36,6 +39,7 @@ def setup_players_dependencies(users_repo: UsersRepository, players_repo: Tracke
     router.players_repo = players_repo  # type: ignore[attr-defined]
     router.api = api  # type: ignore[attr-defined]
     router.search_cache = {}  # type: ignore[attr-defined]
+    router.awaiting_add_input = set()  # type: ignore[attr-defined]
 
 
 async def _save_player(message: Message, account_id: str, personaname: str, profile_url: str | None) -> None:
@@ -46,25 +50,15 @@ async def _save_player(message: Message, account_id: str, personaname: str, prof
             f"Игрок {_profile_link(account_id, personaname, profile_url, router.api)} (<code>{account_id}</code>) добавлен.",  # type: ignore[attr-defined]
             parse_mode="HTML",
         )
+        if not players_repo.get_default_player(message.from_user.id):
+            players_repo.set_default_player(message.from_user.id, account_id)
+            await message.answer("Сделал этого игрока профилем по умолчанию ⭐")
     else:
         await message.answer("Этот игрок уже есть в вашем списке.")
 
 
-@router.message(Command("addplayer"))
-async def cmd_addplayer(message: Message) -> None:
-    users_repo: UsersRepository = router.users_repo  # type: ignore[attr-defined]
+async def _resolve_and_save_player(message: Message, query: str) -> None:
     api: DeadlockApiClient = router.api  # type: ignore[attr-defined]
-
-    users_repo.ensure_user(message.from_user.id)
-    args = (message.text or "").split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer(
-            "Использование: <code>/addplayer account_id|Steam64|steamcommunity_url|nickname</code>",
-            parse_mode="HTML",
-        )
-        return
-
-    query = args[1].strip()
     try:
         resolved = await api.resolve_player(query)
     except (DeadlockApiError, ValueError):
@@ -102,6 +96,30 @@ async def cmd_addplayer(message: Message) -> None:
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+@router.message(Command("addplayer"))
+async def cmd_addplayer(message: Message) -> None:
+    users_repo: UsersRepository = router.users_repo  # type: ignore[attr-defined]
+
+    users_repo.ensure_user(message.from_user.id)
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer("Напишите ID/Steam64/URL/ник одним сообщением.")
+        awaiting_add: set[int] = router.awaiting_add_input  # type: ignore[attr-defined]
+        awaiting_add.add(message.from_user.id)
+        return
+
+    await _resolve_and_save_player(message, args[1].strip())
+
+
+@router.message(F.text & ~F.text.startswith("/"))
+async def handle_pending_add_player(message: Message) -> None:
+    awaiting_add: set[int] = router.awaiting_add_input  # type: ignore[attr-defined]
+    if message.from_user.id not in awaiting_add:
+        return
+    awaiting_add.discard(message.from_user.id)
+    await _resolve_and_save_player(message, (message.text or "").strip())
+
+
 @router.message(Command("pickplayer"))
 async def cmd_pickplayer(message: Message) -> None:
     search_cache: dict[int, list[dict[str, str]]] = router.search_cache  # type: ignore[attr-defined]
@@ -134,66 +152,25 @@ async def cmd_players(message: Message) -> None:
     await message.answer("<b>Ваши отслеживаемые игроки:</b>", parse_mode="HTML")
     for p in players:
         status = "✅ автоотслеживание включено" if p.auto_reports_enabled else "⏸ автоотслеживание выключено"
+        default_mark = "⭐ по умолчанию" if p.is_default else ""
         name = _profile_link(p.player_id, p.display_name, p.steam_profile_url, api)
         await message.answer(
-            f"• {name}\nID: <code>{p.player_id}</code>\n{status}",
+            f"• {name} (<code>{p.player_id}</code>)\n{status}\n{default_mark}",
             parse_mode="HTML",
-            reply_markup=players_management_keyboard(p.player_id, p.auto_reports_enabled, p.steam_profile_url),
+            reply_markup=players_management_keyboard(p.player_id, p.auto_reports_enabled, p.steam_profile_url, p.is_default),
         )
-
-
-@router.message(Command("removeplayer"))
-async def cmd_removeplayer(message: Message) -> None:
-    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
-    args = (message.text or "").split(maxsplit=1)
-    if len(args) < 2:
-        await message.answer("Использование: <code>/removeplayer account_id</code>", parse_mode="HTML")
-        return
-    if players_repo.remove_player(message.from_user.id, args[1].strip()):
-        await message.answer("Игрок удалён из отслеживания.")
-    else:
-        await message.answer("Игрок не найден в вашем списке.")
-
-
-@router.message(Command("track"))
-async def cmd_track(message: Message) -> None:
-    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
-    args = (message.text or "").split(maxsplit=2)
-    if len(args) < 3 or args[2] not in {"on", "off"}:
-        await message.answer("Использование: <code>/track account_id on|off</code>", parse_mode="HTML")
-        return
-    enabled = args[2] == "on"
-    updated = players_repo.set_auto_reports(message.from_user.id, args[1], enabled)
-    await message.answer("Автоотслеживание обновлено." if updated else "Игрок не найден.")
 
 
 @router.message(F.text == MAIN_MENU_ADD_PLAYER)
 async def btn_add_player(message: Message) -> None:
-    await message.answer(
-        "Отправьте: <code>/addplayer account_id|Steam64|steamcommunity_url|nickname</code>",
-        parse_mode="HTML",
-    )
+    awaiting_add: set[int] = router.awaiting_add_input  # type: ignore[attr-defined]
+    awaiting_add.add(message.from_user.id)
+    await message.answer("Отправьте ID/Steam64/steamcommunity URL/ник одним сообщением.")
 
 
 @router.message(F.text == MAIN_MENU_PLAYERS)
 async def btn_players(message: Message) -> None:
     await cmd_players(message)
-
-
-@router.message(F.text == MAIN_MENU_LAST_MATCH)
-async def btn_last_match(message: Message) -> None:
-    await message.answer(
-        "Нажмите /players и выберите игрока — там есть кнопка <b>Последний матч</b>.",
-        parse_mode="HTML",
-    )
-
-
-@router.message(F.text == MAIN_MENU_PROFILE)
-async def btn_profile(message: Message) -> None:
-    await message.answer(
-        "Нажмите /players и выберите игрока — там есть кнопка <b>Профиль</b>.",
-        parse_mode="HTML",
-    )
 
 
 @router.message(F.text == MAIN_MENU_ANALYTICS)
@@ -203,10 +180,7 @@ async def btn_analytics(message: Message) -> None:
 
 @router.message(F.text == MAIN_MENU_SETTINGS)
 async def btn_settings(message: Message) -> None:
-    await message.answer(
-        "<b>Настройки</b>\nВыберите действие для автоотчётов:",
-        parse_mode="HTML",
-    )
+    await message.answer("<b>Настройки</b>\nВыберите действие для автоотчётов:", parse_mode="HTML")
     await message.answer("Выберите опцию:", reply_markup=settings_keyboard())
 
 
@@ -234,13 +208,7 @@ async def btn_settings_disable_auto(message: Message) -> None:
 
 @router.message(F.text == MAIN_MENU_HELP)
 async def btn_help(message: Message) -> None:
-    await message.answer(
-        "Подсказка:\n"
-        "1) Добавьте игрока через /addplayer (ID/Steam64/URL/ник).\n"
-        "2) Откройте 👥 Мои игроки и управляйте профилем кнопками.\n"
-        "3) В разделе 📊 Аналитика доступны герои, тиммейты, соперники, пати и мета.\n"
-        "4) В ⚙️ Настройки можно массово включить/выключить автоотчёты.",
-    )
+    await message.answer("Используйте главное меню и кнопки в карточках игроков.")
 
 
 @router.callback_query(lambda c: c.data and c.data.startswith("rm:"))
@@ -257,3 +225,15 @@ async def cb_toggle_tracking(callback: CallbackQuery) -> None:
     _, player_id, toggle_to = callback.data.split(":", maxsplit=2)
     ok = players_repo.set_auto_reports(callback.from_user.id, player_id, toggle_to == "on")
     await callback.answer("Статус автоотслеживания обновлён." if ok else "Игрок не найден.")
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("def:"))
+async def cb_default_player(callback: CallbackQuery) -> None:
+    players_repo: TrackedPlayersRepository = router.players_repo  # type: ignore[attr-defined]
+    _, player_id, value = callback.data.split(":", maxsplit=2)
+    if value == "on":
+        ok = players_repo.set_default_player(callback.from_user.id, player_id)
+        await callback.answer("Игрок установлен по умолчанию." if ok else "Игрок не найден.")
+    else:
+        ok = players_repo.clear_default_player(callback.from_user.id)
+        await callback.answer("Игрок по умолчанию снят." if ok else "Не было игрока по умолчанию.")
