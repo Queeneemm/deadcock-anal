@@ -80,7 +80,7 @@ class CardRenderer:
             card.alpha_composite(rounded_rectangle_overlay((80, 80), 16, (30, 32, 40, 220)), (60 + index * 90, icons_y - 4))
             card.alpha_composite(item_img, (64 + index * 90, icons_y))
 
-        draw.text((780, 1308), safe_text("Deadlock Scout Bot", font_small), fill=(130, 130, 140), font=font_small)
+        draw.text((780, 1308), safe_text("DeadCock ANALis", font_small), fill=(130, 130, 140), font=font_small)
 
         output = self.output_dir / f"match_{summary.match_id}_{player_name}.png"
         card.convert("RGB").save(output, "PNG")

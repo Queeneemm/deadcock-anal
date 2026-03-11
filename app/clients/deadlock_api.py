@@ -9,6 +9,8 @@ from xml.etree import ElementTree
 
 import httpx
 
+from app.services.heroes import hero_name_by_id
+
 logger = logging.getLogger(__name__)
 
 STEAM64_OFFSET = 76561197960265728
@@ -351,7 +353,7 @@ class DeadlockApiClient:
         if isinstance(hero_stats, list) and hero_stats:
             for hero in sorted(hero_stats, key=lambda item: int(item.get("matches_played") or item.get("matches") or 0), reverse=True)[:3]:
                 hero_id = hero.get("hero_id")
-                top_heroes.append({"hero_name": f"Hero #{hero_id}" if hero_id is not None else "Неизвестный герой", "matches": int(hero.get("matches_played") or hero.get("matches") or 0)})
+                top_heroes.append({"hero_name": hero_name_by_id(hero_id), "matches": int(hero.get("matches_played") or hero.get("matches") or 0)})
 
         return {
             "account_id": account_id,
@@ -424,17 +426,11 @@ class DeadlockApiClient:
 
         raw_hero_id = match_payload.get("hero_id")
         hero_id = int(raw_hero_id) if isinstance(raw_hero_id, (int, float, str)) and str(raw_hero_id).isdigit() else 0
-        hero_name = f"Hero #{hero_id}" if hero_id > 0 else "Неизвестный герой"
+        hero_name = hero_name_by_id(hero_id) if hero_id > 0 else "Неизвестный герой"
         match_result = str(match_payload.get("match_result") or "").strip().lower()
         player_team = str(match_payload.get("player_team") or "").strip().lower()
 
-        is_win = False
-        if match_result in {"win", "won", "victory", "true", "1"}:
-            is_win = True
-        elif match_result in {"loss", "lose", "lost", "defeat", "false", "0"}:
-            is_win = False
-        elif match_result and player_team:
-            is_win = match_result == player_team
+        is_win = bool(match_result and player_team and match_result == player_team)
 
         return {
             "match_id": str(match_payload.get("match_id") or match_payload.get("id") or ""),
